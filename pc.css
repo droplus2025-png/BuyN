@@ -1,0 +1,74 @@
+/* buyN PC screen — royal blue, gold, silver (from the logo). Only active in body.pcmode */
+body.pcmode #app{max-width:none;margin:0;padding:0}
+.pc{flex:1;display:flex;flex-direction:column;min-height:0;font-size:1.05rem}
+.pc-top{display:flex;align-items:center;gap:10px;background:var(--bar);padding:6px 14px;border-bottom:2px solid var(--gold2)}
+.pc-top .brand{display:flex;align-items:center;gap:10px;min-width:260px}.pc-top .brand img{height:48px;border-radius:8px}
+.pc-top .brand b{font-size:1.3rem;color:var(--gold)}
+.pc-top .note{flex:1;text-align:center;color:var(--silver)}.pc-top .date{color:var(--silver);font-weight:700}
+.tb{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-weight:800;color:var(--silver)}
+.tb.on{background:var(--gold);color:var(--ink)}.tb:disabled{opacity:.35}
+.pc-body{flex:1;display:grid;grid-template-columns:210px minmax(0,1fr);gap:14px;padding:14px;min-height:0}
+#work{min-height:0;display:flex;flex-direction:column;overflow:auto}
+.pc-sale{flex:1;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;min-height:0}
+#work>.screen{width:100%;max-width:1100px;margin:0 auto}
+body.pcmode #work .hdr .logo{display:none}
+.pc-menu{display:flex;flex-direction:column;gap:6px}
+.pc-menu button{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;font-weight:800;color:var(--text);font-size:1.05rem}
+.pc-menu button.on{background:linear-gradient(#ffd966,var(--gold2));color:var(--ink)}
+.pc-center{display:flex;flex-direction:column;gap:10px;min-height:0}
+.disp{width:100%;background:#fff;color:#0a1636;border:0;border-radius:12px;font-size:2.4rem;font-weight:800;padding:10px 16px;text-align:left;outline:none}
+.disp.empty{color:#8a96b8}
+.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.modes button{padding:14px 6px;border-radius:12px;background:var(--panel);border:2px solid var(--line);font-weight:800;font-size:1.1rem;color:var(--text)}
+.modes button.on{background:var(--gold);color:var(--ink);border-color:var(--gold2)}
+.keys{flex:1;min-height:0;display:grid;gap:8px;padding:10px;background:var(--panel2);border:1px solid var(--line);border-radius:14px}
+.keys.num{grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(5,1fr)}
+.keys button{border-radius:12px;background:var(--panel);border:1px solid var(--line);font-size:2rem;font-weight:800;color:var(--text)}
+.keys button:active{filter:brightness(1.4)}.keys button:disabled{opacity:.25}
+.keys .op{background:#1d3f9e}.keys .big{background:linear-gradient(#ffd966,var(--gold2));color:var(--ink);font-size:2.6rem}
+.keys .fn{background:#2a4a8e}.keys .eq{background:linear-gradient(#e6e8ee,#9a9ea9);color:#0a1636}
+.keys .pay{background:linear-gradient(#3ddc84,#16a34a);color:#04260f;font-size:2.2rem}
+.keys.abc{display:flex;flex-direction:column}.keys.abc .kr{flex:1;display:flex;gap:8px;justify-content:center}
+.keys.abc .kr button{flex:0 1 90px;font-size:1.9rem}.keys.abc .wide{flex:1 1 auto}
+.pc-left{display:flex;flex-direction:column;gap:10px;min-height:0;overflow:auto}
+.pc-left .info{display:flex;gap:10px}.pc-left .info div{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px 12px;display:flex;justify-content:space-between;align-items:center}
+.pc-left .info b{font-size:1.6rem;color:var(--gold)}
+.pc-left .f{background:var(--panel2);border:2px solid var(--line);border-radius:12px;color:var(--text);padding:12px;font-size:1.05rem}
+.pc-left .ext{background:linear-gradient(#3ddc84,#16a34a);color:#04260f;border-radius:12px;padding:14px;font-weight:800;font-size:1.1rem}
+.tbl,.res-list{display:flex;flex-direction:column;gap:4px}
+.th,.tr{display:grid;grid-template-columns:1fr 90px 80px;gap:8px;padding:8px 10px;text-align:right}
+.th{color:var(--muted);font-weight:700}.tr{background:var(--panel2);border:1px solid var(--line);border-radius:10px;color:var(--text)}
+.res-list .res{display:grid;grid-template-columns:1fr auto auto;gap:12px;direction:ltr;text-align:left;padding:12px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;color:var(--text)}
+.res-list .res.exact{border-color:var(--ok);background:#0c2f22}
+#kbm{direction:ltr}
+.keys.abc .kr .wide{flex:1 1 auto}
+
+/* identity: every screen on the computer wears the logo colours (royal blue, gold, silver) */
+body.pcmode{--lime:#fdc621;--lime2:#e0a21c;--teal:#e1e2e6;--rose:#e1e2e6;--rose-d:#9a9ea9;--hot:#fdc621;--hot2:#e0a21c;--green:#e1e2e6;--green-d:#04257a;--amber:#fdc621;
+  background:radial-gradient(circle at 88% 92%,#1272e3 0,#002e90 38%,#00175f 78%) fixed}
+body.pcmode #app{background:none}
+.pc-top{background:linear-gradient(#0a3a9e,#002e90)}
+/* pressed: a clear colour change on every button (all screens) */
+button.pressed{background:#22d3ee!important;color:#00175f!important;border-color:#a5f3fc!important;transform:scale(.97);filter:none!important}
+/* next step: the key to press pulses */
+.next{animation:nx 1s ease-in-out infinite;position:relative;z-index:1}
+@keyframes nx{0%,100%{box-shadow:0 0 0 0 #fdc62100}50%{box-shadow:0 0 0 6px #fdc621cc,0 0 22px #fdc621}}
+@media (prefers-reduced-motion:reduce){.next{animation:none;box-shadow:0 0 0 4px #fdc621}}
+.pc-top .note{font-weight:800;color:var(--gold);font-size:1.1rem}.pc-top .note.link{cursor:pointer;text-decoration:underline}
+
+/* stock: category group headers */
+.cat-h{display:flex;align-items:center;gap:10px;margin:12px 0 4px;padding:10px 12px;border-radius:10px;background:linear-gradient(90deg,#0a3a9e,#04257a);border:1px solid var(--line);cursor:pointer;font-weight:800}
+.cat-h b{color:var(--gold);font-size:1.3rem;min-width:22px}.cat-h .cn{flex:1;text-align:left;color:var(--silver)}.cat-h .cc{color:var(--muted);font-size:.9rem}
+
+/* category statistics */
+.catstat{padding:8px 0;border-bottom:1px solid var(--line)}.cs-h{display:flex;align-items:center;gap:10px}.cs-h b{color:var(--gold);font-size:1.25rem;min-width:22px}
+.cs-h span{flex:1;font-weight:700}.cs-h em{font-style:normal;color:var(--gold);font-weight:800}
+.cs-bar{height:7px;border-radius:4px;background:#04257a;margin:6px 0;overflow:hidden}.cs-bar i{display:block;height:100%;background:linear-gradient(90deg,var(--gold2),var(--gold))}
+.cs-d{display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--muted);font-size:.9rem}.cs-d b{color:var(--text)}
+
+/* invoices on the computer: list | invoice side by side */
+.inv-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:14px;min-height:0;flex:1}
+.inv-listcol{display:flex;flex-direction:column;gap:8px;min-height:0}
+.inv-pane{overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px}
+.inv-row.sel{border-color:var(--gold);background:#0a3a9e}
+.inv-listcol .chips{flex-wrap:wrap;overflow:visible}

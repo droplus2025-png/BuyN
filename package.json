@@ -1,0 +1,8 @@
+{
+  "name": "buyn",
+  "version": "0.6.0",
+  "type": "module",
+  "description": "buyN - offline-first sales and stock PWA (engine / ui / css / assets / tests)",
+  "main": "index.js",
+  "scripts": { "test": "node --test" }
+}
