@@ -71,7 +71,7 @@ test('purchase: stock, weighted cost, till, supplier debt, same phone = same sup
   assert.equal(sup.length, 1);                                           // 0661... and +212661... are one supplier
   assert.equal(sup[0].balance, 1000);
   await rejects(w.emp.purchase({ supplier: { name: 'Ali', phone: '0661234567' }, lines: [{ productId: nails.id, qty: 1, price: '3' }], paid: '99' }), 'OVERPAYMENT');
-  await rejects(w.emp.purchase({ supplier: { name: '', phone: '' }, lines: [{ productId: nails.id, qty: 1, price: '4' }] }), 'NAME_REQUIRED');
+  await rejects(w.emp.purchase({ supplier: { name: '', phone: '' }, lines: [{ productId: nails.id, qty: 1, price: '4' }], paid: '1' }), 'NAME_REQUIRED');
   assert.deepEqual(await w.owner.reports.integrityCheck(), []);
 });
 
@@ -653,4 +653,16 @@ test('smart entry: smallest free number per category, planned codes skipped, exi
   await rejects(w.owner.products.create({ name: 'PEINTURE' }), 'PRODUCT_EXISTS');            // never twice
   await w.owner.products.adjustStock(a.id, '3');                                              // the quantity is added instead
   assert.equal((await w.owner.products.byName('Peinture')).qty, 3000);
+});
+
+test('purchase: supplier is optional when fully paid, required for a debt', async () => {
+  const w = await world();
+  const p = await w.owner.products.create({ name: 'Colle', purchasePrice: '2' });
+  const r = await w.owner.purchase({ lines: [{ productId: p.id, qty: '3', price: '2' }] });          // paid in full, nobody named
+  assert.equal(r.supplier, null); assert.equal(r.invoice.supplier_id, null);
+  assert.equal((await w.owner.products.byName('Colle')).qty, 3000);
+  await rejects(w.owner.purchase({ lines: [{ productId: p.id, qty: '1', price: '2' }], paid: '1' }), 'NAME_REQUIRED');   // a debt needs a name
+  const d = await w.owner.purchase({ supplier: { name: 'Ahmed', phone: '0611223344' }, lines: [{ productId: p.id, qty: '1', price: '2' }], paid: '1' });
+  assert.equal(d.invoice.credit_amount, 100);
+  assert.deepEqual(await w.owner.reports.integrityCheck(), []);
 });

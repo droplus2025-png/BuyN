@@ -13,7 +13,6 @@ export function purchasesApi(ctx) {
       ctx.access.require('purchase');
       return store.transaction(async (tx) => {
         if (!input.lines?.length) fail('EMPTY_CART', 'No product to buy');
-        const supplier = await findOrCreateParty(ctx, tx, 'suppliers', input.supplier || {});
         const lines = [], stock = [], newSale = [], warnings = [];
         for (const l of input.lines) {
           const p = await tx.get('products', l.productId);
@@ -29,9 +28,11 @@ export function purchasesApi(ctx) {
         const paid = input.paid === undefined || input.paid === null || input.paid === '' ? total : parseMoney(input.paid, 'paid');
         if (paid > total) fail('OVERPAYMENT', 'Payment cannot exceed the invoice', { total, paid });   // never pay more than the bill
         const credit = total - paid;
+        const named = String(input.supplier?.name ?? '').trim() || String(input.supplier?.phone ?? '').trim();
+        const supplier = credit > 0 || named ? await findOrCreateParty(ctx, tx, 'suppliers', input.supplier || {}) : null;   // fully paid: the supplier is optional
         if ((await cashBalance(tx)) - paid < 0) warnings.push({ type: 'CASH_NEGATIVE' });          // allowed, but flagged
 
-        const res = await postInvoice(ctx, tx, { type: 'purchase', supplier_id: supplier.id, total, paid, credit_amount: credit,
+        const res = await postInvoice(ctx, tx, { type: 'purchase', supplier_id: supplier?.id ?? null, total, paid, credit_amount: credit,
           cash_effect: -paid, note: input.note, lines, stock, debt: credit > 0 ? [{ supplier_id: supplier.id, amount: credit }] : [] });
 
         for (const [p, sale] of newSale) {                        // sale price edited on the purchase page

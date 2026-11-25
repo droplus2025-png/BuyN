@@ -1,3 +1,8 @@
+/* Font: Tajawal when it is installed on the device, otherwise Dubai (included with Windows 10/11, very close), then the system fonts. */
+@font-face{font-family:'Tajawal';font-weight:400;src:local('Tajawal Regular'),local('Tajawal-Regular')}
+@font-face{font-family:'Tajawal';font-weight:500;src:local('Tajawal Medium'),local('Tajawal-Medium')}
+@font-face{font-family:'Tajawal';font-weight:700;src:local('Tajawal Bold'),local('Tajawal-Bold')}
+@font-face{font-family:'Tajawal';font-weight:800;src:local('Tajawal ExtraBold'),local('Tajawal-ExtraBold')}
 :root{
   --bg:#00175f; --bar:#002e90; --panel:#0a3a9e; --panel2:#04257a; --line:#2f5fd0; --silver:#e1e2e6;
   --gold:#fdc621; --gold2:#e0a21c; --ink:#1b1400; --lime:#b6f23c; --teal:#2bb5a0; --amber:#e8a020;
@@ -6,7 +11,7 @@
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
-  font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Arabic",Tahoma,sans-serif;
+  font-family:"Tajawal","Dubai","Segoe UI",system-ui,-apple-system,Roboto,"Noto Sans Arabic",Tahoma,sans-serif;
   overscroll-behavior:none;-webkit-user-select:none;user-select:none}
 input,textarea{-webkit-user-select:text;user-select:text}
 #app{height:var(--vvh,100%);transform:translateY(var(--vvt,0px));display:flex;flex-direction:column;max-width:560px;margin:0 auto;

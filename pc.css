@@ -11,7 +11,8 @@ body.pcmode #app{max-width:none;margin:0;padding:0}
 #work{min-height:0;display:flex;flex-direction:column;overflow:auto}
 .pc-sale{flex:1;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;min-height:0}
 #work>.screen{width:100%;max-width:1100px;margin:0 auto}
-body.pcmode #work .hdr .logo{display:none}
+#work>.screen:has(.split3,.split,.cols2,.twocol){max-width:none}   /* two-pane screens use the whole width */
+body.pcmode #work .hdr .logo,body.pcmode #work .hdr .back{display:none}   /* the right-hand menu is the way back */
 .pc-menu{display:flex;flex-direction:column;gap:6px}
 .pc-menu button{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;font-weight:800;color:var(--text);font-size:1.05rem}
 .pc-menu button.on{background:linear-gradient(#ffd966,var(--gold2));color:var(--ink)}
@@ -85,3 +86,8 @@ button.pressed{background:#22d3ee!important;color:#00175f!important;border-color
 .pf-two{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;margin-bottom:6px}
 .pf-code{display:flex;align-items:center;gap:6px}.pf-code .code{flex:1;min-width:0;text-align:left;font-weight:800;color:var(--gold)}.codebox .cn{color:var(--gold)}
 .dupe{color:var(--amber);font-weight:700;min-height:0}
+
+/* invoices: type filters stacked in a column next to the menu | search + list | invoice */
+.split3{display:grid;grid-template-columns:150px minmax(0,1fr) minmax(0,1.05fr);gap:14px;min-height:0;flex:1}
+.split-filters .chips{flex-direction:column;flex-wrap:nowrap;gap:8px;overflow:visible}
+.split-filters .chip{width:100%;padding:14px 8px;font-size:1.05rem;text-align:center}

@@ -12,9 +12,7 @@ export async function renderPurchase(app) {
   const createdNew = new Map();   // new products already created by a previous (failed) attempt: reuse them, never create twice
 
   mount(`<div class="screen">${header('شراء')}<div class="body"><div class="twocol"><div class="c1">
-    <div class="row"><input id="sn" class="inp" placeholder="اسم المورد" style="flex:1.2" autocomplete="off">
-      <input id="sp" class="inp" inputmode="tel" placeholder="هاتف المورد" style="flex:1"></div><div id="ssg"></div>
-    <div class="card" style="display:flex;flex-direction:column;gap:8px">
+        <div class="card" style="display:flex;flex-direction:column;gap:8px">
       <input id="pk" class="inp" placeholder="🔍 رقم المنتج أو اسمه" autocomplete="off">
       <div id="sug"></div><div id="picked" class="muted"></div>
       <div id="newbox" style="display:none">${codeBoxHtml()}</div>
@@ -42,16 +40,13 @@ export async function renderPurchase(app) {
     if (!pc) return;
     document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
     let text, target;
-    if (!sel) [text, target] = lines.length ? (!$('#sn').value.trim() ? ['اكتب اسم المورد، ثم اضغط تأكيد', '#sn'] : ['أضف منتجاً آخر، أو اضغط تأكيد للدفع', '#pay']) : ['ابحث عن المنتج برقمه أو باسمه', '#pk'];
+    if (!sel) [text, target] = lines.length ? ['أضف منتجاً آخر، أو اضغط تأكيد للدفع', '#pay'] : ['ابحث عن المنتج برقمه أو باسمه', '#pk'];
     else if (!$('#qt').value) [text, target] = ['اكتب الكمية المشتراة', '#qt'];
     else if (!$('#pa').value && !$('#pa').disabled) [text, target] = ['اكتب سعر الشراء', '#pa'];
     else [text, target] = ['اضغط إضافة', '#addl'];
     const note = $('#note'); if (note) note.textContent = text;
     $(target)?.classList.add('next');
   }
-  // known suppliers are suggested while typing a name or a phone
-  partySuggest(app, 'supplier', $('#sn'), $('#sp'), $('#ssg'));
-
   // product search / selection
   function lockFields() {
     $('#pa').disabled = !!(sel && !sel.isNew && !can.edit_purchase_price);
@@ -114,11 +109,14 @@ export async function renderPurchase(app) {
     const T = total();
     openModal({
       title: `الدفع للمورد · ${money(T)}`,
-      html: `<div class="lbl">المبلغ المدفوع الآن</div><input id="paid" class="inp" inputmode="decimal" value="${money(T)}"><div id="info" class="muted"></div><div class="err" id="perr"></div>`,
+      html: `<div class="lbl">المبلغ المدفوع الآن</div><input id="paid" class="inp" inputmode="decimal" value="${money(T)}"><div id="info" class="muted"></div>
+        <input id="sn" class="inp" placeholder="اسم المورد" autocomplete="off"><input id="sp" class="inp" inputmode="tel" placeholder="هاتف المورد" autocomplete="off"><div id="ssg"></div><div class="err" id="perr"></div>`,
       buttons: [{ label: 'إلغاء' }, { label: 'تأكيد', cls: 'gold', onClick: (close, m) => confirmPurchase(m) }],
       onOpen: (m) => {
         const paid = m.querySelector('#paid'), info = m.querySelector('#info');
-        const upd = () => { const p = safe(() => M.parseMoney(paid.value || 0), 0); info.textContent = p > T ? '⚠ المبلغ أكبر من الفاتورة' : p < T ? `دين للمورد: ${money(T - p)}` : ''; };
+        const sn = m.querySelector('#sn');
+        const upd = () => { const p = safe(() => M.parseMoney(paid.value || 0), 0); info.textContent = p > T ? '⚠ المبلغ أكبر من الفاتورة' : p < T ? `دين للمورد: ${money(T - p)} — اسم المورد مطلوب` : ''; sn.placeholder = p < T ? 'اسم المورد (مطلوب)' : 'اسم المورد (اختياري)'; };
+        partySuggest(app, 'supplier', sn, m.querySelector('#sp'), m.querySelector('#ssg'));      // known suppliers are suggested while typing
         paid.addEventListener('input', upd); paid.addEventListener('focus', () => paid.select());
         upd(); paid.focus(); paid.select();
       },
@@ -127,14 +125,15 @@ export async function renderPurchase(app) {
   async function confirmPurchase(m) {
     const err = m.querySelector('#perr');
     try {
-      if (!$('#sn').value.trim()) { $('#sn').focus(); throw Object.assign(new Error(), { code: 'SUPPLIER_REQUIRED' }); }   // checked BEFORE any new product is created
+      const sn = m.querySelector('#sn').value.trim();
+      if (safe(() => M.parseMoney(m.querySelector('#paid').value || 0), 0) < total() && !sn) { m.querySelector('#sn').focus(); throw Object.assign(new Error(), { code: 'SUPPLIER_REQUIRED' }); }   // a debt needs a name; checked BEFORE any new product is created
       // new products are created first (smallest free SKU); then ONE atomic purchase
       if (safe(() => M.parseMoney(m.querySelector('#paid').value || 0), 0) > total()) throw Object.assign(new Error(), { code: 'OVERPAYMENT' });
       const created = createdNew;
       for (const l of lines) if (l.sel.isNew && !created.has(l.name.toLowerCase())) {
         created.set(l.name.toLowerCase(), (await eng.products.create({ name: l.name, purchasePrice: l.cost, salePrice: l.sale || '0', sku: l.code })).id);
       }
-      const input = { supplier: { name: $('#sn').value, phone: $('#sp').value }, paid: m.querySelector('#paid').value,
+      const input = { supplier: { name: sn, phone: m.querySelector('#sp').value }, paid: m.querySelector('#paid').value,
         lines: lines.map((l) => {
           const o = { productId: l.sel.isNew ? created.get(l.name.toLowerCase()) : l.sel.id, qty: l.qty, price: l.cost };
           if (!l.sel.isNew && l.sale && safe(() => M.parseScaled(l.sale, 2) * 100) !== l.sel.sale_price) o.salePrice = l.sale;   // only a real change
@@ -142,9 +141,9 @@ export async function renderPurchase(app) {
         }) };
       const r = await eng.purchase(input);
       const msg = await eng.share.invoiceMessage(r.invoice.invoice_no).catch(() => null);
-      lines = []; createdNew.clear(); $('#sn').value = ''; $('#sp').value = ''; drawList(); m.remove(); done(r, msg);
+      lines = []; createdNew.clear(); drawList(); m.remove(); done(r, msg);
       return false;
-    } catch (e) { err.textContent = e.code === 'SUPPLIER_REQUIRED' ? 'اكتب اسم المورد' : errText(e); return false; }
+    } catch (e) { err.textContent = e.code === 'SUPPLIER_REQUIRED' ? 'اكتب اسم المورد (مطلوب لأن جزءاً من المبلغ دَين)' : errText(e); return false; }
   }
   function done(r, msg) {
     const neg = r.warnings.some((w) => w.type === 'CASH_NEGATIVE');
@@ -155,7 +154,6 @@ export async function renderPurchase(app) {
   const cp = codePicker(app, $('#newbox'), { taken: () => lines.filter((l) => l.sel.isNew).map((l) => l.code) });
   $('#pa').addEventListener('input', () => { if (sel?.isNew && !pvTouched) $('#pv').value = suggestSale(cp.cat, $('#pa').value); });
   $('#pv').addEventListener('input', () => { pvTouched = !!$('#pv').value; });
-  $('#sn').addEventListener('input', nextStep);
   ['pk', 'qt', 'pa'].forEach((id) => $(`#${id}`).addEventListener('input', nextStep));
   drawList();
 }

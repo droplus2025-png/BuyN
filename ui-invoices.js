@@ -27,10 +27,10 @@ export async function renderInvoices(app, params = {}) {
   const pc = document.body.classList.contains('pcmode');            // computer: list and invoice side by side
   let filter = params.filter || 'all', back = () => app.go('home'), shown = null;
   const out = () => (pc ? $('#pane') : $('#main'));
-  const controls = `<input id="q" class="inp" placeholder="🔍 رقم الفاتورة أو اسم / هاتف" autocomplete="off">
-    <div class="chips" id="chips">${FILTERS.map(([k, l]) => `<button class="chip ${k === filter ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
-    <div id="main" style="flex:1;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px"></div>`;
-  mount(`<div class="screen">${header('الفواتير')}${pc ? `<div class="body split"><div class="split-list">${controls}</div><div id="pane" class="split-pane"><div class="muted" style="padding:14px">اختر فاتورة من القائمة</div></div></div>` : `<div class="body col">${controls}</div>`}</div>`);
+  const search = '<input id="q" class="inp" placeholder="🔍 رقم الفاتورة أو اسم / هاتف" autocomplete="off">';
+  const chips = `<div class="chips" id="chips">${FILTERS.map(([k, l]) => `<button class="chip ${k === filter ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>`;
+  const listBox = '<div id="main" style="flex:1;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px"></div>';
+  mount(`<div class="screen">${header('الفواتير')}${pc ? `<div class="body split3"><div class="split-filters">${chips}</div><div class="split-list">${search}${listBox}</div><div id="pane" class="split-pane"><div class="muted" style="padding:14px">اختر فاتورة من القائمة</div></div></div>` : `<div class="body col">${search}${chips}${listBox}</div>`}</div>`);
   $('#hdrBack').onclick = () => back();
 
   async function list() {
