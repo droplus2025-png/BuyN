@@ -5,24 +5,35 @@ import { money as M } from './index.js';
 
 export async function renderReturn(app, { mode = 'customer' } = {}) {
   const eng = app.engine, cust = mode === 'customer';
+  const pc = document.body.classList.contains('pcmode');      // computer: invoice list | return form side by side
+  let shown = null;
   const types = cust ? ['sale', 'quick_sale'] : ['purchase'];
-  mount(`<div class="screen">${header(cust ? 'إرجاع من زبون' : 'إرجاع للمورد')}<div class="body col">
-    <input id="q" class="inp" placeholder="🔍 رقم الفاتورة أو اسم / هاتف ${cust ? 'الزبون' : 'المورد'}" autocomplete="off">
-    <div id="main" style="flex:1;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px"></div>
-    <div id="foot"></div></div></div>`);
+  mount(`<div class="screen">${header(cust ? 'إرجاع من زبون' : 'إرجاع للمورد')}<div class="${pc ? 'body split' : 'body col'}">
+    ${pc ? '<div class="split-list">' : ''}<input id="q" class="inp" placeholder="🔍 رقم الفاتورة أو اسم / هاتف ${cust ? 'الزبون' : 'المورد'}" autocomplete="off">
+    <div id="main" style="flex:1;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px"></div>${pc ? '</div><div id="pane" class="split-pane"><div id="pbody"></div>' : ''}
+    <div id="foot"></div>${pc ? '</div>' : ''}</div></div>`);
+  const out = () => (pc ? $('#pbody') : $('#main'));
+  // computer: the program points to the next step (notice in the top bar + pulsing target)
+  function nextStep(text, target) {
+    if (!pc) return;
+    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
+    const note = $('#note'); if (note) note.textContent = text;
+    if (target) document.querySelector(target)?.classList.add('next');
+  }
   let back = () => app.go('home');
   $('#hdrBack').onclick = () => back();
 
   const when = (iso) => new Date(iso).toLocaleString('ar-MA-u-nu-latn', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
   async function list() {
-    back = () => app.go('home'); $('#foot').innerHTML = ''; $('#q').style.display = '';
+    back = () => app.go('home'); if (!pc) { $('#foot').innerHTML = ''; $('#q').style.display = ''; }
     const rows = await eng.reports.searchInvoices({ text: $('#q').value, types });
     $('#main').innerHTML = rows.length ? `<div class="results" style="max-height:none">${rows.map((i) => `
-      <button class="res" data-id="${i.id}" style="grid-template-columns:auto 1fr auto"><span class="sku">${i.invoice_no}</span>
+      <button class="res ${i.id === shown ? 'sel' : ''}" data-id="${i.id}" style="grid-template-columns:auto 1fr auto"><span class="sku">${i.invoice_no}</span>
       <span>${esc(i.party_name || (cust ? 'بدون اسم' : ''))}<br><span class="muted" style="font-size:.8rem">${when(i.created_at)}${i.is_modified ? ' · معدلة' : ''}</span></span>
       <span class="p">${money(i.total)}</span></button>`).join('')}</div>` : '<div class="muted" style="padding:14px">لا فواتير مطابقة</div>';
     document.querySelectorAll('#main .res').forEach((b) => b.addEventListener('click', () => open(b.dataset.id)));
+    if (!shown) nextStep(rows.length ? 'اختر الفاتورة المراد إرجاع منتجاتها' : `اكتب رقم الفاتورة أو اسم ${cust ? 'الزبون' : 'المورد'}`, rows.length ? '#main .res' : '#q');
   }
   let t; $('#q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(list, 150); });   // the pending search must never override an opened invoice
 
@@ -30,12 +41,13 @@ export async function renderReturn(app, { mode = 'customer' } = {}) {
     clearTimeout(t);
     const d = await eng.reports.invoice(id);
     if (!d) return toast('الفاتورة غير موجودة', true);
-    $('#q').style.display = 'none';
-    back = list;
+    shown = id;
+    if (pc) document.querySelectorAll('#main .res').forEach((r) => r.classList.toggle('sel', r.dataset.id === id));
+    else { $('#q').style.display = 'none'; back = list; }
     const ret = {};                                          // lineId -> text typed by the user
     const avail = (l) => l.qty - l.returned;
     const lineVal = (l) => { try { return M.lineCents(M.parseQty(ret[l.id] || 0), l.unit_price); } catch { return 0; } };
-    $('#main').innerHTML = `<div class="card"><b style="color:var(--gold)">${d.invoice.invoice_no}</b> · ${esc(d.party?.name || '')}
+    out().innerHTML = `<div class="card"><b style="color:var(--gold)">${d.invoice.invoice_no}</b> · ${esc(d.party?.name || '')}
       <span class="muted"> · الإجمالي ${money(d.invoice.total)}${d.remaining ? ` · المتبقي ${money(d.remaining)}` : ''}</span></div>
       ${d.lines.map((l) => `<div class="line" style="grid-template-columns:1fr 60px 78px" data-id="${l.id}">
         <div class="nm">${esc(l.name)}<br><span class="muted" style="font-size:.78rem">${price4(l.unit_price)} × ${qtyStr(l.qty)}${l.returned ? ` · أُرجع ${qtyStr(l.returned)}` : ''}</span></div>
@@ -50,8 +62,9 @@ export async function renderReturn(app, { mode = 'customer' } = {}) {
         ${cash ? `<div class="kv"><span>${cust ? 'يُرجع نقداً للزبون' : 'يُسترد نقداً من المورد'}</span><b>${money(cash)}</b></div>` : ''}
         <div class="err" id="rerr"></div><button class="btn teal big" id="go" style="width:100%;font-size:1.2rem" ${total <= 0 ? 'disabled' : ''}>تأكيد الإرجاع</button></div>`;
       $('#go').onclick = confirm;
+      nextStep(total > 0 ? 'اضغط تأكيد الإرجاع' : 'اكتب الكمية المرتجعة، أو اضغط «الكل»', total > 0 ? '#go' : '.all:not([disabled])');
     };
-    document.querySelectorAll('#main .line').forEach((row) => {
+    out().querySelectorAll('.line').forEach((row) => {
       const l = d.lines.find((x) => x.id === row.dataset.id), inp = row.querySelector('.r');
       inp.addEventListener('focus', () => inp.select());
       inp.addEventListener('input', () => { ret[l.id] = inp.value; foot(); });

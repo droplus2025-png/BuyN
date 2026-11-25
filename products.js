@@ -52,6 +52,19 @@ export function productsApi(ctx) {
       });
     },
 
+    // smallest free code of a category (numbers of deleted products stay reserved); `taken` = codes already planned elsewhere
+    async nextCode(cat = '0', taken = []) {
+      if (!/^[0-9]$/.test(String(cat))) fail('BAD_CATEGORY', 'Category is one digit 0-9');
+      const skip = new Set(taken.map(String));
+      return store.transaction(async (tx) => {
+        const used = new Set((await tx.all('sku_registry')).map((r) => r.sku));
+        let n = 1; while (used.has(`${cat}${n}`) || skip.has(`${cat}${n}`)) n++;
+        return `${cat}${n}`;
+      });
+    },
+    // the product with this name (same spelling rules as the "name is free" check), or null
+    async byName(name) { return store.transaction(async (tx) => (await tx.find('products', (p) => !p.deleted_at && nameKey(p.name) === nameKey(name)))[0] || null); },
+
     // prices and name: every change is journaled; SKU change / delete need manage_stock
     async update(id, { name, purchasePrice, salePrice, sku }) {
       return store.transaction(async (tx) => {

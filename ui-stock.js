@@ -1,6 +1,7 @@
 // Stock screen: products grouped by category, LTR table (code | product | purchase | sale | quantity).
 // The owner taps a row to edit quantity, prices, number and name. A row with 0 in number / purchase / sale / quantity is RED.
 import { catOf } from './products.js';
+import { openProductForm } from './ui-productform.js';
 import { mount, $, esc, header, toast, errText, openModal, confirmBox, price4, qtyStr, priceShort } from './ui-core.js';
 
 export async function renderStock(app) {
@@ -19,7 +20,6 @@ export async function renderStock(app) {
   const isBad = (p) => !p.sku || !p.purchase_price || !p.sale_price || !p.qty || p.qty < 0;      // 0 in any of the four cells (or negative stock)
   // ---- products grouped by category (first digit of the code); a group can be folded; table is left-to-right
   const catName = (d) => (app.cfg.categories || {})[d] || '';
-  const catOpts = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `<option value="${d}">${d}${catName(d) ? ` · ${esc(catName(d))}` : ''}</option>`).join('');
   const folded = (app.stockFolded ||= new Set());
   async function load() {
     const rows = await eng.products.search($('#q').value.trim(), 1500);
@@ -84,20 +84,7 @@ export async function renderStock(app) {
     });
   }
 
-  $('#add')?.addEventListener('click', () => openModal({
-    title: 'إضافة منتج',
-    html: `<input id="n" class="inp" placeholder="اسم المنتج"><div class="lbl">الصنف (أول رقم في كود المنتج)</div><select id="ct" class="inp">${catOpts}</select><div class="row"><input id="pa" class="inp" inputmode="decimal" placeholder="سعر الشراء">
-      <input id="pv" class="inp" inputmode="decimal" placeholder="سعر البيع"></div>
-      ${can.manage_stock ? '<input id="qt" class="inp" inputmode="decimal" placeholder="الكمية الأولية (اختياري)">' : ''}<div class="err" id="err"></div>`,
-    buttons: [{ label: 'إلغاء' }, { label: 'حفظ', cls: 'gold', onClick: async (close, m) => {
-      try {
-        const p = await eng.products.create({ name: m.querySelector('#n').value, purchasePrice: m.querySelector('#pa').value || '0',
-          salePrice: m.querySelector('#pv').value || '0', qty: m.querySelector('#qt')?.value || '0', cat: m.querySelector('#ct').value });
-        toast(`تمت الإضافة · كود ${p.sku}`); load();
-      } catch (e) { m.querySelector('#err').textContent = errText(e) + (e.details?.sku ? ` (رقم ${e.details.sku})` : ''); return false; }
-    } }],
-    onOpen: (m) => m.querySelector('#n').focus(),
-  }));
+  $('#add')?.addEventListener('click', () => openProductForm(app, { onDone: load }));
 
   $('#paste')?.addEventListener('click', () => openModal({
     title: 'لصق من Excel', tall: true,

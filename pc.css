@@ -67,8 +67,21 @@ button.pressed{background:#22d3ee!important;color:#00175f!important;border-color
 .cs-d{display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--muted);font-size:.9rem}.cs-d b{color:var(--text)}
 
 /* invoices on the computer: list | invoice side by side */
-.inv-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:14px;min-height:0;flex:1}
-.inv-listcol{display:flex;flex-direction:column;gap:8px;min-height:0}
-.inv-pane{overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:14px;min-height:0;flex:1}
+.split-list{display:flex;flex-direction:column;gap:8px;min-height:0}
+.split-pane{overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px}
 .inv-row.sel{border-color:var(--gold);background:#0a3a9e}
-.inv-listcol .chips{flex-wrap:wrap;overflow:visible}
+.split-list .chips{flex-wrap:wrap;overflow:visible}
+
+/* till on the computer: today | closing history */
+.cols2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}
+.cols2-item{display:flex;flex-direction:column;gap:10px}
+.party.sel{border-color:var(--gold)!important;background:#0a3a9e}
+
+/* smart product entry: category digits (the chosen one is green), category name, suggested code */
+.catrow{display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin-bottom:6px}
+.catrow button{padding:10px 0;font-weight:800;font-size:1.1rem;border-radius:8px;background:var(--panel2);border:1px solid var(--line);color:var(--text)}
+.catrow button.on{background:#22c55e;color:#04260f;border-color:#86efac}.codebox.locked .catrow{opacity:.45}
+.pf-two{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center;margin-bottom:6px}
+.pf-code{display:flex;align-items:center;gap:6px}.pf-code .code{flex:1;min-width:0;text-align:left;font-weight:800;color:var(--gold)}.codebox .cn{color:var(--gold)}
+.dupe{color:var(--amber);font-weight:700;min-height:0}

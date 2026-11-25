@@ -1,10 +1,13 @@
 // Purchase screen: supplier, product lines (existing or new), partial payment -> supplier debt.
 import { mount, $, esc, header, toast, errText, openModal, confirmBox, showStrip, money, price4, partySuggest } from './ui-core.js';
 import { money as M } from './index.js';
+import { codeBoxHtml, codePicker, lastCat, rememberCat, suggestSale, rememberMargin, CODE_OK } from './ui-productform.js';
 
 export async function renderPurchase(app) {
   const eng = app.engine, can = app.session.permissions;
-  let lines = [];          // {sel, name, sku, qty, cost, sale}
+  const pc = document.body.classList.contains('pcmode');
+  let lines = [];          // {sel, name, sku, code (new products), qty, cost, sale}
+  let pvTouched = false;
   let sel = null;          // selected product, or {isNew:true, name}
   const createdNew = new Map();   // new products already created by a previous (failed) attempt: reuse them, never create twice
 
@@ -14,6 +17,7 @@ export async function renderPurchase(app) {
     <div class="card" style="display:flex;flex-direction:column;gap:8px">
       <input id="pk" class="inp" placeholder="🔍 رقم المنتج أو اسمه" autocomplete="off">
       <div id="sug"></div><div id="picked" class="muted"></div>
+      <div id="newbox" style="display:none">${codeBoxHtml()}</div>
       <div class="row"><input id="qt" class="inp" inputmode="decimal" placeholder="الكمية"><input id="pa" class="inp" inputmode="decimal" placeholder="سعر الشراء"><input id="pv" class="inp" inputmode="decimal" placeholder="سعر البيع"></div>
       <button class="btn gold" id="addl">إضافة</button></div></div><div class="c2">
     <div id="list" style="flex:1;overflow:auto;min-height:0"></div>
@@ -27,11 +31,24 @@ export async function renderPurchase(app) {
   function drawList() {
     $('#tot').textContent = money(total()); $('#pay').disabled = !lines.length;
     $('#list').innerHTML = lines.map((l, i) => `<div class="line" style="grid-template-columns:1fr 54px 64px 64px 30px" data-i="${i}">
-      <div class="nm">${l.sel.isNew ? '<span style="color:var(--lime)">جديد · </span>' : `<span class="muted">${l.sku} · </span>`}${esc(l.name)}</div>
+      <div class="nm">${l.sel.isNew ? `<span style="color:var(--lime)">جديد ${esc(l.code || '')} · </span>` : `<span class="muted">${l.sku} · </span>`}${esc(l.name)}</div>
       <div>${esc(l.qty)}</div><div>${esc(l.cost)}</div><div class="muted">${esc(l.sale || '—')}</div><button class="x">✖</button></div>`).join('');
+    nextStep();
     document.querySelectorAll('#list .x').forEach((b) => b.addEventListener('click', () => { lines.splice(Number(b.closest('.line').dataset.i), 1); drawList(); }));
   }
 
+  // computer: the program points to the next step (notice in the top bar + pulsing target)
+  function nextStep() {
+    if (!pc) return;
+    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
+    let text, target;
+    if (!sel) [text, target] = lines.length ? (!$('#sn').value.trim() ? ['اكتب اسم المورد، ثم اضغط تأكيد', '#sn'] : ['أضف منتجاً آخر، أو اضغط تأكيد للدفع', '#pay']) : ['ابحث عن المنتج برقمه أو باسمه', '#pk'];
+    else if (!$('#qt').value) [text, target] = ['اكتب الكمية المشتراة', '#qt'];
+    else if (!$('#pa').value && !$('#pa').disabled) [text, target] = ['اكتب سعر الشراء', '#pa'];
+    else [text, target] = ['اضغط إضافة', '#addl'];
+    const note = $('#note'); if (note) note.textContent = text;
+    $(target)?.classList.add('next');
+  }
   // known suppliers are suggested while typing a name or a phone
   partySuggest(app, 'supplier', $('#sn'), $('#sp'), $('#ssg'));
 
@@ -43,8 +60,10 @@ export async function renderPurchase(app) {
   function pick(p) {
     sel = p; $('#sug').innerHTML = ''; $('#pk').value = '';
     $('#picked').innerHTML = p.isNew ? `✔ <b style="color:var(--lime)">منتج جديد:</b> ${esc(p.name)}` : `✔ <b style="color:var(--gold)">${p.sku}</b> · ${esc(p.name)} <span class="muted">(المخزون ${M.fmtQty(p.qty)})</span>`;
-    $('#pa').value = p.isNew ? '' : price4(p.purchase_price); $('#pv').value = p.isNew ? '' : price4(p.sale_price); $('#qt').value = '';
-    lockFields(); $('#qt').focus();
+    $('#pa').value = p.isNew ? '' : price4(p.purchase_price); $('#pv').value = p.isNew ? '' : price4(p.sale_price); $('#qt').value = '1';
+    $('#newbox').style.display = p.isNew ? '' : 'none'; pvTouched = false;
+    if (p.isNew) cp.setCat(lastCat());
+    lockFields(); $('#qt').focus(); nextStep();
   }
   let results = [];
   async function suggest() {
@@ -61,7 +80,9 @@ export async function renderPurchase(app) {
     if (e.key !== 'Enter') return;
     await suggest();
     const q = $('#pk').value.trim();
-    const exact = /^\d+$/.test(q) ? results.find((p) => p.sku === q) : results.length === 1 ? results[0] : null;
+    const sameName = results.find((p) => p.name.toLowerCase() === q.toLowerCase());
+    const exact = /^\d+$/.test(q) ? results.find((p) => p.sku === q) : sameName || (results.length === 1 ? results[0] : null);
+    if (sameName) toast('هذا المنتج موجود — ستُضاف الكمية إلى مخزونه');
     if (exact) pick(exact);
   });
   [['qt', 'pa'], ['pa', 'pv']].forEach(([a, b]) => $(`#${a}`).addEventListener('keydown', (e) => { if (e.key === 'Enter') { const n = $(`#${b}`); (n.disabled ? $('#addl') : n).focus(); if (n.disabled) $('#addl').click(); } }));
@@ -74,8 +95,17 @@ export async function renderPurchase(app) {
       if (M.parseQty($('#qt').value || '0') <= 0) throw Object.assign(new Error(), { code: 'BAD_NUMBER' });
       M.parsePrice($('#pa').value || '0'); if ($('#pv').value) M.parseScaled($('#pv').value, 2);
     } catch (e) { toast(errText(e), true); return; }
-    lines.push({ sel, name: sel.name, sku: sel.sku, qty: $('#qt').value, cost: $('#pa').value || '0', sale: $('#pv').value });
+    const code = sel.isNew ? cp.code : sel.sku;
+    if (sel.isNew && !CODE_OK.test(code)) { toast('الرقم: خانة الصنف ثم رقم المنتج (مثل 823)', true); return; }
+    if (sel.isNew && lines.some((l) => l.sel.isNew && l.code === code)) { toast('هذا الرقم مستعمل في القائمة', true); return; }
+    const twin = lines.find((l) => (sel.isNew ? l.sel.isNew && l.name.toLowerCase() === sel.name.toLowerCase() : !l.sel.isNew && l.sel.id === sel.id));
+    if (twin) { twin.qty = String(Number(String(twin.qty).replace(',', '.')) + Number(String($('#qt').value).replace(',', '.'))); toast('هذا المنتج موجود في القائمة — أُضيفت الكمية'); }   // never twice: add the quantity
+    else {
+      lines.push({ sel, name: sel.name, sku: sel.sku, code, qty: $('#qt').value, cost: $('#pa').value || '0', sale: $('#pv').value });
+      if (sel.isNew) { rememberCat(code[0]); rememberMargin(code[0], $('#pa').value, $('#pv').value); }
+    }
     sel = null; $('#picked').textContent = ''; ['qt', 'pa', 'pv'].forEach((id) => { $(`#${id}`).value = ''; $(`#${id}`).disabled = false; });
+    $('#newbox').style.display = 'none';
     drawList(); $('#pk').focus();
   };
 
@@ -97,11 +127,12 @@ export async function renderPurchase(app) {
   async function confirmPurchase(m) {
     const err = m.querySelector('#perr');
     try {
+      if (!$('#sn').value.trim()) { $('#sn').focus(); throw Object.assign(new Error(), { code: 'SUPPLIER_REQUIRED' }); }   // checked BEFORE any new product is created
       // new products are created first (smallest free SKU); then ONE atomic purchase
       if (safe(() => M.parseMoney(m.querySelector('#paid').value || 0), 0) > total()) throw Object.assign(new Error(), { code: 'OVERPAYMENT' });
       const created = createdNew;
       for (const l of lines) if (l.sel.isNew && !created.has(l.name.toLowerCase())) {
-        created.set(l.name.toLowerCase(), (await eng.products.create({ name: l.name, purchasePrice: l.cost, salePrice: l.sale || '0' })).id);
+        created.set(l.name.toLowerCase(), (await eng.products.create({ name: l.name, purchasePrice: l.cost, salePrice: l.sale || '0', sku: l.code })).id);
       }
       const input = { supplier: { name: $('#sn').value, phone: $('#sp').value }, paid: m.querySelector('#paid').value,
         lines: lines.map((l) => {
@@ -113,7 +144,7 @@ export async function renderPurchase(app) {
       const msg = await eng.share.invoiceMessage(r.invoice.invoice_no).catch(() => null);
       lines = []; createdNew.clear(); $('#sn').value = ''; $('#sp').value = ''; drawList(); m.remove(); done(r, msg);
       return false;
-    } catch (e) { err.textContent = errText(e); return false; }
+    } catch (e) { err.textContent = e.code === 'SUPPLIER_REQUIRED' ? 'اكتب اسم المورد' : errText(e); return false; }
   }
   function done(r, msg) {
     const neg = r.warnings.some((w) => w.type === 'CASH_NEGATIVE');
@@ -121,5 +152,10 @@ export async function renderPurchase(app) {
       html: `✔ ${esc(r.invoice.invoice_no)} · <b>${money(r.invoice.total)}</b>${r.invoice.credit_amount ? ` · دين للمورد ${money(r.invoice.credit_amount)}` : ''}${neg ? '<br>⚠ رصيد الصندوق سالب' : ''}`,
       actions: msg?.link ? [{ label: 'واتساب', cls: 'gold', onClick: () => { window.open(msg.link, '_blank'); eng.share.markSent(msg.invoice_id).catch(() => {}); } }] : [] });
   }
+  const cp = codePicker(app, $('#newbox'), { taken: () => lines.filter((l) => l.sel.isNew).map((l) => l.code) });
+  $('#pa').addEventListener('input', () => { if (sel?.isNew && !pvTouched) $('#pv').value = suggestSale(cp.cat, $('#pa').value); });
+  $('#pv').addEventListener('input', () => { pvTouched = !!$('#pv').value; });
+  $('#sn').addEventListener('input', nextStep);
+  ['pk', 'qt', 'pa'].forEach((id) => $(`#${id}`).addEventListener('input', nextStep));
   drawList();
 }

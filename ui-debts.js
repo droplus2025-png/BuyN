@@ -5,14 +5,15 @@ import { showInvoice } from './ui-invoices.js';
 
 export async function renderDebts(app, { mode = 'customer' } = {}) {
   const eng = app.engine, can = app.session.permissions, cust = mode === 'customer';
-  let open = null;                                           // id of the expanded party
+  const pc = document.body.classList.contains('pcmode');      // computer: party list | selected party side by side
+  let open = null, rowsNow = [];                             // id of the expanded party
   let showAll = false;                                       // also list the people who owe nothing (their paid invoices are kept)
-  mount(`<div class="screen">${header(cust ? 'ديون الزبناء' : 'مستحقات الموردين')}<div class="body col">
+  mount(`<div class="screen">${header(cust ? 'ديون الزبناء' : 'مستحقات الموردين')}<div class="${pc ? 'body split' : 'body col'}">${pc ? '<div class="split-list">' : ''}
     <div class="card" style="display:flex;justify-content:space-between;align-items:center"><span class="muted">${cust ? 'إجمالي الديون' : 'إجمالي المستحقات'}</span><b id="sum" style="font-size:1.5rem;color:var(--gold)">0</b></div>
     <input id="q" class="inp" placeholder="🔍 بحث بالاسم أو الهاتف" autocomplete="off">
     <div class="chips"><button class="chip on" data-all="0">${cust ? 'عليهم دين' : 'لهم مستحقات'}</button><button class="chip" data-all="1">الكل (بما فيهم المسدَّدون)</button></div>
     ${can.add_previous_debt ? `<button class="btn" id="prev">+ ${cust ? 'إضافة دين سابق' : 'إضافة مستحق سابق'}</button>` : ''}
-    <div id="list" style="flex:1;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px"></div></div></div>`);
+    <div id="list" style="flex:1;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px"></div>${pc ? '</div><div id="pane" class="split-pane"></div>' : ''}</div></div>`);
   $('#hdrBack').onclick = () => app.go('home');
 
   async function load() {
@@ -20,6 +21,7 @@ export async function renderDebts(app, { mode = 'customer' } = {}) {
     const q = $('#q').value.trim().toLowerCase(), digits = q.replace(/\D/g, '');
     const rows = all.filter((p) => (showAll || p.balance > 0) && (!q || p.name.toLowerCase().includes(q) || (digits.length >= 3 && p.phone_norm.includes(digits.replace(/^0+/, '')))))
       .sort((a, b) => b.balance - a.balance || a.name.localeCompare(b.name));
+    rowsNow = rows;
     $('#sum').textContent = money(all.reduce((a, p) => a + Math.max(p.balance, 0), 0));
     $('#list').innerHTML = rows.length ? rows.map((p) => `
       <div class="party card" data-id="${p.id}" style="padding:0;overflow:hidden">
@@ -29,15 +31,29 @@ export async function renderDebts(app, { mode = 'customer' } = {}) {
         <div class="pbody"></div></div>`).join('') : '<div class="muted" style="padding:14px">لا يوجد أحد</div>';
     document.querySelectorAll('.phead').forEach((b) => b.addEventListener('click', () => toggle(b.closest('.party').dataset.id)));
     if (open) { const el = document.querySelector(`.party[data-id="${open}"]`); if (el) expand(el, rows.find((r) => r.id === open)); else open = null; }
+    if (pc && !open) $('#pane').innerHTML = `<div class="muted" style="padding:14px">${cust ? 'اختر زبوناً' : 'اختر مورداً'} من القائمة لعرض فواتيره</div>`;
+    nextStep();
+  }
+  // computer: the program points to the next step (notice in the top bar + pulsing target)
+  function nextStep() {
+    if (!pc) return;
+    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
+    const cur = rowsNow.find((r) => r.id === open);
+    const [text, target] = !rowsNow.length ? [`لا ${cust ? 'ديون' : 'مستحقات'} — كل شيء مسدَّد ✓`, null]
+      : !open ? [`اختر ${cust ? 'الزبون' : 'المورد'} لعرض فواتيره`, '.phead']
+      : cur?.balance > 0 ? [`اضغط ${cust ? 'قبض' : 'دفع'} لتسجيل الدفعة`, '#pay'] : ['هذا الحساب مسدَّد ✓', null];
+    const note = $('#note'); if (note) note.textContent = text;
+    if (target) document.querySelector(target)?.classList.add('next');
   }
   let t; $('#q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 150); });
 
   document.querySelectorAll('.chip').forEach((ch) => ch.addEventListener('click', () => { showAll = ch.dataset.all === '1'; document.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === ch)); open = null; load(); }));
-  async function toggle(id) { open = open === id ? null : id; await load(); }
+  async function toggle(id) { open = pc ? id : (open === id ? null : id); await load(); }
 
   async function expand(el, p) {
     const st = await eng.reports.partyStatement(cust ? { customer_id: p.id } : { supplier_id: p.id });
-    const body = el.querySelector('.pbody');
+    const body = pc ? $('#pane') : el.querySelector('.pbody');
+    if (pc) document.querySelectorAll('.party').forEach((x) => x.classList.toggle('sel', x === el));
     body.innerHTML = `<div style="padding:0 10px 10px;display:flex;flex-direction:column;gap:6px">
       ${p.balance > 0 ? `<div class="row"><button class="btn teal act" id="pay" style="flex:1;font-size:1.05rem">${cust ? 'قبض' : 'دفع'}</button>
         ${cust && can.send_reminder ? '<button class="btn gold act" id="rem" style="flex:1">تذكير واتساب</button>' : ''}</div>` : ''}
@@ -48,6 +64,7 @@ export async function renderDebts(app, { mode = 'customer' } = {}) {
     </div>`;
     body.querySelectorAll('.inv').forEach((b) => b.addEventListener('click', () => showInvoice(app, b.dataset.id)));
     body.querySelector('#pay')?.addEventListener('click', () => pay(p));
+    nextStep();
     body.querySelector('#rem')?.addEventListener('click', async () => {
       try { const r = await eng.share.reminder(p.id); window.open(r.link, '_blank'); toast('تم تجهيز التذكير'); load(); } catch (e) { toast(errText(e), true); }
     });

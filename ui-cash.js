@@ -3,13 +3,23 @@
 import { mount, $, esc, header, toast, errText, openModal, money, fmtWhen } from './ui-core.js';
 
 export async function renderCash(app) {
+  const pc = document.body.classList.contains('pcmode');
   const eng = app.engine, owner = app.session.role === 'owner', can = app.session.permissions;
   mount(`<div class="screen">${header('الصندوق')}<div class="body col" id="b"></div></div>`);
   $('#hdrBack').onclick = () => app.go('home');
 
+  // computer: the program points to the next step (notice in the top bar + pulsing target)
+  function nextStep(st) {
+    if (!pc) return;
+    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
+    const [text, target] = !st.open ? ['ابدأ جلسة الصندوق', '#open'] : !$('#counted').value ? ['اعدّ النقود في الصندوق ثم اكتب المبلغ', '#counted'] : ['اضغط إغلاق الصندوق', '#close'];
+    const note = $('#note'); if (note) note.textContent = text;
+    $(target)?.classList.add('next');
+  }
+
   async function draw() {
     const st = await eng.cash.status();
-    let html = '';
+    let html = '', side = '';
     if (owner) {
       const bal = await eng.reports.cashBalance();
       html += `<div class="card"><div class="kv"><span>الرصيد الآن (المتوقع)</span><b style="font-size:1.4rem;color:var(--gold)">${money(bal)}</b></div></div>`;
@@ -26,11 +36,12 @@ export async function renderCash(app) {
     if (owner || can.cash_deposit_withdraw) html += `<div class="row"><button class="btn" id="dep" style="flex:1">+ إيداع</button><button class="btn" id="wd" style="flex:1">− سحب</button></div>`;
     if (owner) {
       const sess = (await eng.reports.cashSessions()).filter((s) => s.closed_at).slice(0, 15);
-      html += `<div class="card"><div class="grp" style="margin-top:0">آخر الإغلاقات</div>${sess.length ? sess.map((s) => `
+      side += `<div class="card"><div class="grp" style="margin-top:0">آخر الإغلاقات</div>${sess.length ? sess.map((s) => `
         <div class="kv"><span>${fmtWhen(s.closed_at)}<br><span class="muted" style="font-size:.78rem">معدود ${money(s.counted_amount)} · متوقع ${money(s.expected_amount)}</span></span>
         <b style="color:${s.difference === 0 ? 'var(--ok)' : 'var(--red)'}">${s.difference === 0 ? 'مطابق ✓' : (s.difference > 0 ? '+' : '') + money(s.difference)}</b></div>`).join('') : '<div class="muted">لا إغلاقات بعد</div>'}</div>`;
     }
-    $('#b').innerHTML = html;
+    $('#b').innerHTML = pc ? `<div class="cols2"><div class="cols2-item">${html}</div><div class="cols2-item">${side}</div></div>` : html + side;
+    $('#counted')?.addEventListener('input', () => nextStep(st)); nextStep(st);
 
     $('#open')?.addEventListener('click', async () => { try { await eng.cash.open(); draw(); } catch (e) { toast(errText(e), true); } });
     $('#close')?.addEventListener('click', async () => {

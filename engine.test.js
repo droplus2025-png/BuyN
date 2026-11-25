@@ -640,3 +640,17 @@ test('category statistics: sales, profit, returns and stock per category (first 
   assert.equal((await w.owner.reports.categoryStats({ days: 0 })).cats.find((c) => c.cat === '2').revenue, 1500);   // a return comes back negative
   await rejects(w.emp.reports.categoryStats(), 'PERMISSION_DENIED');
 });
+
+test('smart entry: smallest free number per category, planned codes skipped, existing product found by name', async () => {
+  const w = await world();
+  const a = await w.owner.products.create({ name: 'Peinture', cat: '8' }); await w.owner.products.create({ name: 'Rouleau', cat: '8' });
+  assert.equal(await w.owner.products.nextCode('8'), '83');
+  assert.equal(await w.owner.products.nextCode('8', ['83', '84']), '85');
+  assert.equal(await w.owner.products.nextCode('4'), '41');
+  await rejects(w.owner.products.nextCode('12'), 'BAD_CATEGORY');
+  assert.equal((await w.owner.products.byName('  peinture ')).sku, '81');
+  assert.equal(await w.owner.products.byName('Inconnu'), null);
+  await rejects(w.owner.products.create({ name: 'PEINTURE' }), 'PRODUCT_EXISTS');            // never twice
+  await w.owner.products.adjustStock(a.id, '3');                                              // the quantity is added instead
+  assert.equal((await w.owner.products.byName('Peinture')).qty, 3000);
+});

@@ -2,19 +2,29 @@
 import { mount, $, esc, header, toast, errText, money, fmtWhen } from './ui-core.js';
 
 export async function renderExpenses(app) {
-  const eng = app.engine;
-  mount(`<div class="screen">${header('مصاريف')}<div class="body col">
+  const eng = app.engine, pc = document.body.classList.contains('pcmode');      // computer: form | list side by side
+  mount(`<div class="screen">${header('مصاريف')}<div class="body col">${pc ? '<div class="cols2"><div class="cols2-item">' : ''}
     <div class="card" style="display:flex;flex-direction:column;gap:8px">
       <input id="amt" class="inp" inputmode="decimal" placeholder="المبلغ" autocomplete="off">
       <input id="desc" class="inp" placeholder="الوصف (كهرباء، نقل، إيجار…)" autocomplete="off">
       <div class="err" id="err"></div>
       <button class="btn teal big" id="go" style="font-size:1.3rem">تسجيل المصروف</button></div>
-    <div class="card" style="display:flex;justify-content:space-between"><span class="muted">مصاريف اليوم</span><b id="today" style="color:var(--gold)">0</b></div>
-    <div id="list" style="flex:1;overflow:auto;min-height:0"></div></div></div>`);
+    <div class="card" style="display:flex;justify-content:space-between"><span class="muted">مصاريف اليوم</span><b id="today" style="color:var(--gold)">0</b></div>${pc ? '</div><div class="cols2-item">' : ''}
+    <div id="list" style="flex:1;overflow:auto;min-height:0"></div>${pc ? '</div></div>' : ''}</div></div>`);
   $('#hdrBack').onclick = () => app.go('home');
   $('#amt').focus();
   $('#amt').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#desc').focus(); });
   $('#desc').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#go').click(); });
+
+  // computer: the program points to the next step (notice in the top bar + pulsing target)
+  function nextStep() {
+    if (!pc) return;
+    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
+    const [text, target] = !$('#amt').value ? ['اكتب مبلغ المصروف', '#amt'] : !$('#desc').value.trim() ? ['اكتب وصف المصروف', '#desc'] : ['اضغط تسجيل المصروف', '#go'];
+    const note = $('#note'); if (note) note.textContent = text;
+    $(target).classList.add('next');
+  }
+  ['amt', 'desc'].forEach((id) => $(`#${id}`).addEventListener('input', nextStep));
 
   async function load() {
     const rows = await eng.reports.invoices({ type: 'expense', limit: 60 });
@@ -31,8 +41,8 @@ export async function renderExpenses(app) {
     try {
       const r = await eng.expense($('#amt').value, $('#desc').value);
       toast(`تم · ${r.invoice.invoice_no}${r.warnings?.length ? ' ⚠ الصندوق سالب' : ''}`, false, 2500);
-      $('#amt').value = ''; $('#desc').value = ''; $('#amt').focus(); await load();
+      $('#amt').value = ''; $('#desc').value = ''; $('#amt').focus(); await load(); nextStep();
     } catch (e) { $('#err').textContent = e.code === 'DESCRIPTION_REQUIRED' ? 'اكتب وصف المصروف' : errText(e); }
   };
-  load();
+  load(); nextStep();
 }

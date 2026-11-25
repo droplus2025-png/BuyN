@@ -30,7 +30,7 @@ export async function renderInvoices(app, params = {}) {
   const controls = `<input id="q" class="inp" placeholder="🔍 رقم الفاتورة أو اسم / هاتف" autocomplete="off">
     <div class="chips" id="chips">${FILTERS.map(([k, l]) => `<button class="chip ${k === filter ? 'on' : ''}" data-k="${k}">${l}</button>`).join('')}</div>
     <div id="main" style="flex:1;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:8px"></div>`;
-  mount(`<div class="screen">${header('الفواتير')}${pc ? `<div class="body inv-split"><div class="inv-listcol">${controls}</div><div id="pane" class="inv-pane"><div class="muted" style="padding:14px">اختر فاتورة من القائمة</div></div></div>` : `<div class="body col">${controls}</div>`}</div>`);
+  mount(`<div class="screen">${header('الفواتير')}${pc ? `<div class="body split"><div class="split-list">${controls}</div><div id="pane" class="split-pane"><div class="muted" style="padding:14px">اختر فاتورة من القائمة</div></div></div>` : `<div class="body col">${controls}</div>`}</div>`);
   $('#hdrBack').onclick = () => back();
 
   async function list() {
