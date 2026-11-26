@@ -5,7 +5,7 @@
 // disappear, the customer fields stay. The cart and the stock list are always laid out LEFT to RIGHT:
 //   list : [Sku- product]  [price]  [A<purchase> Q<quantity>]        cart : [Sku- product]  [p=price]  [Q=quantity]  [X]
 // Every button gives a bip, the pay button a double bip (setting: sale_beep).
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, showStrip, money, price4, qtyStr, partySuggest, priceShort } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, showStrip, money, price4, qtyStr, partySuggest, priceShort, safe, sendWhatsApp } from './ui-core.js';
 import { openExternal } from './ui-external.js';
 import { money as M } from './index.js';
 import { validPhone } from './phone.js';
@@ -51,7 +51,6 @@ export async function renderSale(app) {   // "بيع بالفاتورة": the no
   const isNormal = () => normal || cart.length > 0;
 
   // ---- totals (display only: the engine recomputes everything with exact arithmetic)
-  const safe = (fn, d = 0) => { try { return fn(); } catch { return d; } };
   const lineTotal = (l) => safe(() => M.lineCents(M.parseQty(l.qty || 0), M.parsePrice(l.price || 0)));
   const cartTotal = () => cart.reduce((a, l) => a + lineTotal(l), 0);
   const quickCents = () => safe(() => M.parseMoney(quick || 0));
@@ -275,10 +274,7 @@ export async function renderSale(app) {   // "بيع بالفاتورة": the no
     const notes = r.warnings.filter((w) => w.type === 'NEGATIVE_STOCK').map((w) => `⚠ مخزون سالب: ${esc(w.name)}`).join(' · ');
     const first = r.change ? `الباقي للزبون <b>${money(r.change)}</b>` : r.invoice.credit_amount ? `دين <b>${money(r.invoice.credit_amount)}</b>` : `✔ <b>${money(r.invoice.total)}</b>`;
     showStrip({ warn: !!notes, ms: 20000, html: `${esc(r.invoice.invoice_no)} · ${first}${notes ? `<br>${notes}` : ''}`,
-      actions: msg ? [{ label: 'واتساب', cls: 'gold', onClick: () => {
-        window.open(msg.link || `https://wa.me/?text=${encodeURIComponent(msg.text)}`, '_blank');
-        eng.share.markSent(msg.invoice_id).catch(() => {});
-      } }] : [] });
+      actions: msg ? [{ label: 'واتساب', cls: 'gold', onClick: () => sendWhatsApp(eng, msg) }] : [] });
   }
 
   draw();

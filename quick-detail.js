@@ -6,9 +6,10 @@
 // takes the cost of external items out of the till, and replaces the flat quick-sale profit % by the
 // REAL profit:   detail.profit = (total - real costs) - flat profit    ->  original + detail = real.
 import { fail } from './errors.js';
-import { parseQty, parsePrice, lineCents } from './money.js';
+import { lineCents } from './money.js';
 import { postInvoice } from './post.js';
 import { findOrCreateParty } from './parties.js';
+import { buildCartLines } from './cart.js';
 
 // input: { invoice, lines:[{productId, qty, price?} | {external:{name,cost,price,qty}}], allowBelowCost?, customer?:{name,phone} (optional) }
 async function build(ctx, tx, input) {
@@ -19,34 +20,12 @@ async function build(ctx, tx, input) {
   if ((await tx.find('invoices', (i) => i.type === 'return_customer' && i.parent_invoice_id === parent.id)).length) fail('HAS_RETURNS', 'A returned quick sale cannot be detailed');
   if (!input.lines?.length) fail('EMPTY_CART', 'Add at least one product');
 
-  const lines = [], warnings = [], used = new Map();
-  for (const l of input.lines) {
-    if (l.external) {                                        // an item bought for this customer, not in stock
-      ctx.access.require('external_product');
-      const e = l.external;
-      if (!e.name || !String(e.name).trim()) fail('NAME_REQUIRED', 'External product needs a name');
-      const qty = parseQty(e.qty ?? 1, 'qty');
-      if (qty <= 0) fail('BAD_NUMBER', 'Quantity must be positive');
-      lines.push({ kind: 'external', name: String(e.name).trim(), qty, unit_price: parsePrice(e.price, 'sale price'), unit_cost: parsePrice(e.cost ?? 0, 'purchase price') });
-      continue;
-    }
-    const p = await tx.get('products', l.productId);
-    if (!p || p.deleted_at) fail('UNKNOWN_PRODUCT', 'Unknown product', { productId: l.productId });
-    const qty = parseQty(l.qty ?? 1, 'qty');
-    if (qty <= 0) fail('BAD_NUMBER', 'Quantity must be positive');
-    const price = l.price === undefined || l.price === '' ? p.sale_price : parsePrice(l.price, 'price');
-    if (price !== p.sale_price) ctx.access.require('edit_sale_price');
-    lines.push({ kind: 'product', product_id: p.id, name: p.name, qty, unit_price: price, unit_cost: p.purchase_price });
-    const after = p.qty - (used.get(p.id) || 0) - qty;
-    used.set(p.id, (used.get(p.id) || 0) + qty);
-    if (after < 0) warnings.push({ type: 'NEGATIVE_STOCK', sku: p.sku, name: p.name, qty_after: after });
-  }
+  const { lines, stock, warnings, below } = await buildCartLines(ctx, tx, input.lines, { blankPriceIsDefault: true });
   const lineTotals = lines.map((l) => lineCents(l.qty, l.unit_price));
   const distributed = lineTotals.reduce((a, b) => a + b, 0);
   const costTotal = lines.reduce((a, l) => a + lineCents(l.qty, l.unit_cost), 0);
   const externalCost = lines.filter((l) => l.kind === 'external').reduce((a, l) => a + lineCents(l.qty, l.unit_cost), 0);
-  const below = lines.filter((l) => l.unit_price < l.unit_cost).map((l) => ({ name: l.name, price: l.unit_price, cost: l.unit_cost }));
-  return { parent, lines, lineTotals, distributed, remaining: parent.total - distributed, costTotal, externalCost,
+  return { parent, lines, stock, lineTotals, distributed, remaining: parent.total - distributed, costTotal, externalCost,
     realProfit: parent.total - costTotal, warnings, below };
 }
 
@@ -82,7 +61,7 @@ export function quickDetailApi(ctx) {
           total: b.parent.total, paid: b.parent.total, credit_amount: 0,
           cash_effect: -b.externalCost,                         // an external item's cost leaves the till (as in a normal sale)
           cost_total: b.costTotal, profit: b.realProfit - b.parent.profit,        // the flat % is cancelled
-          lines: b.lines, stock: b.lines.map((l, i) => l.kind === 'product' ? { line: i, product_id: l.product_id, reason: 'sale', qty_delta: -l.qty } : null).filter(Boolean),
+          lines: b.lines, stock: b.stock,
         });
         await tx.update('invoices', b.parent.id, { is_modified: true, updated_at: ctx.now().toISOString() });
         return { ...res, real_profit: b.realProfit, flat_profit: b.parent.profit, warnings };

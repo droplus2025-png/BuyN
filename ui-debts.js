@@ -1,6 +1,5 @@
 // Customer debts / supplier dues. Tap a party -> its invoice archive with the remaining amount of each invoice.
-import { mount, $, esc, header, toast, errText, openModal, money, TYPE_AR, fmtWhen, partySuggest } from './ui-core.js';
-import { money as M } from './index.js';
+import { mount, $, esc, header, toast, errText, openModal, money, TYPE_AR, fmtWhen, partySuggest, setNext } from './ui-core.js';
 import { showInvoice } from './ui-invoices.js';
 
 export async function renderDebts(app, { mode = 'customer' } = {}) {
@@ -37,13 +36,11 @@ export async function renderDebts(app, { mode = 'customer' } = {}) {
   // computer: the program points to the next step (notice in the top bar + pulsing target)
   function nextStep() {
     if (!pc) return;
-    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
     const cur = rowsNow.find((r) => r.id === open);
     const [text, target] = !rowsNow.length ? [`لا ${cust ? 'ديون' : 'مستحقات'} — كل شيء مسدَّد ✓`, null]
       : !open ? [`اختر ${cust ? 'الزبون' : 'المورد'} لعرض فواتيره`, '.phead']
       : cur?.balance > 0 ? [`اضغط ${cust ? 'قبض' : 'دفع'} لتسجيل الدفعة`, '#pay'] : ['هذا الحساب مسدَّد ✓', null];
-    const note = $('#note'); if (note) note.textContent = text;
-    if (target) document.querySelector(target)?.classList.add('next');
+    setNext(text, target);
   }
   let t; $('#q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 150); });
 

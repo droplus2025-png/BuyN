@@ -41,7 +41,7 @@ export function renderHome(app) {
     if (id === 'invoices') return app.go('invoices', { filter: app.pendingCount > 0 ? 'pending' : 'all' });   // go straight to what must be completed
     if (LIVE[id]) app.go(...LIVE[id]); else app.go('soon', { title: [...TILES, INVOICES, ADMIN].find((t) => t[0] === id)?.[1] || 'قريباً' });
   }));
-  $('#out').onclick = () => app.logout();
+  $('#out').onclick = () => app.exit();
   // owner: reminder when no recent backup exists (the data lives on this device only)
   if (owner) app.engine.admin.lastBackupAt().then((t) => {
     if (t && Date.now() - new Date(t) < 3 * 864e5) return;

@@ -3,7 +3,7 @@
 //   line (left to right): [n- produit n] [price] [qty] [total]   -- newest on top. Tap a line to edit it.
 // A product × product term asks which number is the QUANTITY (it is the quantity taken out of the stock when the
 // invoice details are completed). The invoice prices are kept when they differ from the catalogue prices.
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, showStrip, money, partySuggest } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, showStrip, money, partySuggest, safe } from './ui-core.js';
 import { money as M } from './index.js';
 import { validPhone } from './phone.js';
 import { beep } from './beep.js';
@@ -35,7 +35,6 @@ export async function renderCalc(app) {
     </div></div>`);
 
   const cn = $('#cn'), cp = $('#cp');
-  const safe = (fn, d = 0) => { try { return fn(); } catch { return d; } };
   const lineTotal = (l) => safe(() => M.lineCents(M.parseQty(l.qty || 0), M.parsePrice(l.price || 0)));
   const total = () => lines.reduce((a, l) => a + lineTotal(l), 0);
   const custOrNull = () => { const n = cn.value.trim(), p = cp.value.trim(); return n && validPhone(p, app.cfg?.wa_country_code || '212') ? { name: n, phone: p } : null; };

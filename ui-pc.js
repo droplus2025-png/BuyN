@@ -3,7 +3,7 @@
 //   right   : fixed menu · centre : display + 3 modes + keypad · left : panel that follows the mode
 // Modes: calc (ordinary calculator) · quick (14+3×5+8 = lines, then pay) · inv (type a code, tap a result).
 // The category digit is never shown: a code is just a number to the seller.
-import { $, esc, toast, errText, openModal, confirmBox, showStrip, money, price4, qtyStr, priceShort } from './ui-core.js';
+import { $, esc, toast, errText, openModal, confirmBox, showStrip, money, price4, qtyStr, priceShort, safe } from './ui-core.js';
 import { openExternal } from './ui-external.js';
 import { money as M } from './index.js';
 import { validPhone } from './phone.js';
@@ -55,7 +55,6 @@ export async function renderPc(app) {
         <div class="modes"><button data-m="inv">بيع بالفاتورة</button><button data-m="quick">بيع سريع</button><button data-m="calc">آلة حاسبة</button></div>
         <div class="keys" id="keys" dir="ltr"></div></main><aside class="pc-left" id="left"></aside></div>`;
   const disp = $('#disp'), keys = $('#keys'), left = $('#left');
-  const safe = (fn, dflt = 0) => { try { return fn(); } catch { return dflt; } };
   const lineTotal = (l) => safe(() => M.lineCents(M.parseQty(l.qty || 0), M.parsePrice(l.price || 0)));
   const sum = (a) => a.reduce((s, l) => s + lineTotal(l), 0);
   const total = () => (mode === 'quick' ? sum(lines) : sum(cart));

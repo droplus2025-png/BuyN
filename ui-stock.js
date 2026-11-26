@@ -2,7 +2,7 @@
 // The owner taps a row to edit quantity, prices, number and name. A row with 0 in number / purchase / sale / quantity is RED.
 import { catOf } from './products.js';
 import { openProductForm } from './ui-productform.js';
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, price4, qtyStr, priceShort } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, price4, qtyStr, priceShort, download, setNext } from './ui-core.js';
 
 export async function renderStock(app) {
   const eng = app.engine, can = app.session.permissions;
@@ -41,14 +41,12 @@ export async function renderStock(app) {
   }
   // ---- the program points to the next step (notice in the top bar + pulsing target)
   function nextStep(rows, bad) {
-    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
     const searching = !!$('#q').value.trim();
     let text = 'المس سطراً لتعديله', target = null;
     if (!rows.length && !searching) { text = 'ابدأ بإضافة أول منتج'; target = '#add'; }
     else if (!rows.length) text = 'لا نتيجة لهذا البحث';
     else if (bad) { text = `${bad} أسطر بقيمة صفر — أكمل الأسعار والكمية`; target = '#list .trow.bad'; }
-    const note = $('#note'); if (note) note.textContent = text;
-    const el = target && document.querySelector(target); if (el) el.classList.add('next');
+    setNext(text, target);
   }
   let t; $('#q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 120); });
 
@@ -108,9 +106,7 @@ export async function renderStock(app) {
   $('#csv')?.addEventListener('click', async () => {
     try {
       const csv = await eng.products.exportCsv();
-      const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = `stock-${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      download(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }), `stock-${new Date().toISOString().slice(0, 10)}.csv`);
       toast('تم تصدير المخزون');
     } catch (e) { toast(errText(e), true); }
   });

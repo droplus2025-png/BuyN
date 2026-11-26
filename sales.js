@@ -3,7 +3,7 @@ import { fail } from './errors.js';
 import { parseMoney, parseQty, parsePrice, parseScaled, lineCents, quickCost4 } from './money.js';
 import { postInvoice, getSetting } from './post.js';
 import { findOrCreateParty } from './parties.js';
-import { cashBalance } from './queries.js';
+import { buildCartLines } from './cart.js';
 
 export function salesApi(ctx) {
   const { store } = ctx;
@@ -14,31 +14,7 @@ export function salesApi(ctx) {
       ctx.access.require('sell');
       return store.transaction(async (tx) => {
         if (!input.lines?.length) fail('EMPTY_CART', 'The cart is empty');
-        const lines = [], warnings = [], below = [], stock = [];
-        const used = new Map();                                  // qty already taken per product in this cart
-        for (const l of input.lines) {
-          if (l.external) {
-            ctx.access.require('external_product');
-            const e = l.external;
-            if (!e.name || !String(e.name).trim()) fail('NAME_REQUIRED', 'External product needs a name');
-            const qty = parseQty(e.qty ?? 1, 'qty');
-            if (qty <= 0) fail('BAD_NUMBER', 'Quantity must be positive');
-            lines.push({ kind: 'external', name: String(e.name).trim(), qty, unit_price: parsePrice(e.price, 'sale price'), unit_cost: parsePrice(e.cost ?? 0, 'purchase price') });
-            continue;
-          }
-          const p = await tx.get('products', l.productId);
-          if (!p || p.deleted_at) fail('UNKNOWN_PRODUCT', 'Unknown product', { productId: l.productId });
-          const qty = parseQty(l.qty ?? 1, 'qty');
-          if (qty <= 0) fail('BAD_NUMBER', 'Quantity must be positive');
-          const price = l.price === undefined ? p.sale_price : parsePrice(l.price, 'price');
-          if (price !== p.sale_price) ctx.access.require('edit_sale_price');
-          lines.push({ kind: 'product', product_id: p.id, name: p.name, qty, unit_price: price, unit_cost: p.purchase_price });
-          stock.push({ line: lines.length - 1, product_id: p.id, reason: 'sale', qty_delta: -qty });
-          const after = p.qty - (used.get(p.id) || 0) - qty;
-          used.set(p.id, (used.get(p.id) || 0) + qty);
-          if (after < 0) warnings.push({ type: 'NEGATIVE_STOCK', sku: p.sku, name: p.name, qty_after: after });
-        }
-        for (const l of lines) if (l.unit_price < l.unit_cost) below.push({ name: l.name, price: l.unit_price, cost: l.unit_cost });
+        const { lines, stock, warnings, below } = await buildCartLines(ctx, tx, input.lines);
         if (below.length) {
           ctx.access.require('sell_below_cost');
           if (!input.allowBelowCost) fail('BELOW_COST', 'Selling below cost: confirm to continue', { items: below });   // UI alert: continue or go back
@@ -117,4 +93,3 @@ export function salesApi(ctx) {
     },
   };
 }
-export { cashBalance };

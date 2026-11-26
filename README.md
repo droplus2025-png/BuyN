@@ -8,23 +8,24 @@
 index.html · app.js          الإقلاع وربط الشاشات (app.go) — لا منطق محاسبي فيهما
 ui-*.js                      الشاشات: ui-core.js (أدوات مشتركة) + شاشة لكل ملف
   ui-pc.js                   هيكل الحاسوب الثابت (الشريط الأزرق والقائمة) + شاشة البيع
-  beep.js · share.js · viewport.js   أدوات المتصفح
+  beep.js · print.js · share.js · viewport.js   أدوات المتصفح
 باقي ملفات .js              المحرك (بدون أي DOM، كله مختبر):
   index.js                   نقطة الدخول: createEngine
   post.js                    تسجيل الحركة الذرّي (فاتورة + مخزون + صندوق + ديون في عملية واحدة)
   products.js                المنتجات والأكواد (صنف 0-9 + رقم المنتج من 1)
-  sales · purchases · returns · payments · cash · parties · queries · settings · auth · admin · backup
+  cart (أسطر السلة المشتركة) · sales · purchases · returns · payments · cash · parties · queries · settings · auth · admin · backup
   sync*.js                   المزامنة (المرحلة الأخيرة)
 *.test.js                    الاختبارات (node --test)
 style.css · pc.css           الأنماط: الأساس · شاشة الحاسوب والهوية
 logo.png · icon-*.png        الشعار والأيقونات
+NotoNaskhArabic-*.woff       خط الحاسوب العربي (رخصة OFL في OFL-NotoNaskhArabic.txt)
 sw.js · manifest.webmanifest العمل دون اتصال والتثبيت
 ```
 
 ## قواعد الكود
 1. الواجهة لا تحسب مالاً: كل رقم يأتي من المحرك (`engine`) بحساب صحيح بالأعداد الصحيحة.
 2. المحرك لا يعرف الشاشة، والشاشة لا تعرف قاعدة البيانات.
-3. كل تعديل في سلوك المحرك يرافقه اختبار في `tests/`.
+3. كل تعديل في سلوك المحرك يرافقه اختبار في ملف `*.test.js`.
 4. لا تُصدَّر دالة أو ثابت لا يستعمله ملف آخر.
 5. عند إضافة ملف: أضفه إلى قائمة `FILES` في `sw.js` وارفع رقم النسخة في `version.js` و`version.json` وهوية الذاكرة `CACHE`.
 

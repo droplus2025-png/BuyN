@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createEngine, createMemoryStore, createAuth, EngineError, money } from './index.js';
-import { settingsApi } from './settings.js';
 import { createAccess } from './permissions.js';
 import { postInvoice } from './post.js';
 import { renderInvoice } from './invoice-text.js';

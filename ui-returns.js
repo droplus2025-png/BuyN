@@ -1,6 +1,6 @@
 // Returns: find the original invoice (number, name or phone), choose quantities, confirm.
 // The original stays frozen; the debt is reduced first, the rest goes through the till.
-import { mount, $, esc, header, toast, errText, openModal, money, price4, qtyStr } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, money, price4, qtyStr, fmtWhen, sendWhatsApp, setNext } from './ui-core.js';
 import { money as M } from './index.js';
 
 export async function renderReturn(app, { mode = 'customer' } = {}) {
@@ -14,23 +14,16 @@ export async function renderReturn(app, { mode = 'customer' } = {}) {
     <div id="foot"></div>${pc ? '</div>' : ''}</div></div>`);
   const out = () => (pc ? $('#pbody') : $('#main'));
   // computer: the program points to the next step (notice in the top bar + pulsing target)
-  function nextStep(text, target) {
-    if (!pc) return;
-    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
-    const note = $('#note'); if (note) note.textContent = text;
-    if (target) document.querySelector(target)?.classList.add('next');
-  }
+  const nextStep = (text, target) => { if (pc) setNext(text, target); };
   let back = () => app.go('home');
   $('#hdrBack').onclick = () => back();
-
-  const when = (iso) => new Date(iso).toLocaleString('ar-MA-u-nu-latn', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
   async function list() {
     back = () => app.go('home'); if (!pc) { $('#foot').innerHTML = ''; $('#q').style.display = ''; }
     const rows = await eng.reports.searchInvoices({ text: $('#q').value, types });
     $('#main').innerHTML = rows.length ? `<div class="results" style="max-height:none">${rows.map((i) => `
       <button class="res ${i.id === shown ? 'sel' : ''}" data-id="${i.id}" style="grid-template-columns:auto 1fr auto"><span class="sku">${i.invoice_no}</span>
-      <span>${esc(i.party_name || (cust ? 'بدون اسم' : ''))}<br><span class="muted" style="font-size:.8rem">${when(i.created_at)}${i.is_modified ? ' · معدلة' : ''}</span></span>
+      <span>${esc(i.party_name || (cust ? 'بدون اسم' : ''))}<br><span class="muted" style="font-size:.8rem">${fmtWhen(i.created_at)}${i.is_modified ? ' · معدلة' : ''}</span></span>
       <span class="p">${money(i.total)}</span></button>`).join('')}</div>` : '<div class="muted" style="padding:14px">لا فواتير مطابقة</div>';
     document.querySelectorAll('#main .res').forEach((b) => b.addEventListener('click', () => open(b.dataset.id)));
     if (!shown) nextStep(rows.length ? 'اختر الفاتورة المراد إرجاع منتجاتها' : `اكتب رقم الفاتورة أو اسم ${cust ? 'الزبون' : 'المورد'}`, rows.length ? '#main .res' : '#q');
@@ -98,7 +91,7 @@ export async function renderReturn(app, { mode = 'customer' } = {}) {
       html: `<div class="kv"><span>قيمة المرتجع</span><b>${money(r.invoice.total)}</b></div>
         ${r.debt_reduced ? `<div class="kv"><span>خُفِّض من الدين</span><b>${money(r.debt_reduced)}</b></div>` : ''}
         ${r.refunded ? `<div class="kv"><span>${cust ? 'أُرجع نقداً' : 'استُرد نقداً'}</span><b>${money(r.refunded)}</b></div>` : ''}`,
-      buttons: [{ label: 'تم' }, ...(msg?.link ? [{ label: 'واتساب', cls: 'gold', onClick: () => { window.open(msg.link, '_blank'); eng.share.markSent(msg.invoice_id).catch(() => {}); } }] : [])],
+      buttons: [{ label: 'تم' }, ...(msg?.link ? [{ label: 'واتساب', cls: 'gold', onClick: () => sendWhatsApp(eng, msg) }] : [])],
     });
   }
   list();

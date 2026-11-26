@@ -1,5 +1,5 @@
 // Purchase screen: supplier, product lines (existing or new), partial payment -> supplier debt.
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, showStrip, money, price4, partySuggest } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, showStrip, money, price4, partySuggest, safe, sendWhatsApp, setNext } from './ui-core.js';
 import { money as M } from './index.js';
 import { codeBoxHtml, codePicker, lastCat, rememberCat, suggestSale, rememberMargin, CODE_OK } from './ui-productform.js';
 
@@ -23,7 +23,6 @@ export async function renderPurchase(app) {
   </div></div></div></div>`);
   $('#hdrBack').onclick = async () => { if (lines.length && !(await confirmBox('قائمة الشراء غير فارغة', 'الخروج دون حفظ؟', 'خروج', 'بقاء'))) return; app.go('home'); };
 
-  const safe = (fn, d = 0) => { try { return fn(); } catch { return d; } };
   const lineTotal = (l) => safe(() => M.lineCents(M.parseQty(l.qty), M.parsePrice(l.cost)));
   const total = () => lines.reduce((a, l) => a + lineTotal(l), 0);
   function drawList() {
@@ -38,14 +37,12 @@ export async function renderPurchase(app) {
   // computer: the program points to the next step (notice in the top bar + pulsing target)
   function nextStep() {
     if (!pc) return;
-    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
     let text, target;
     if (!sel) [text, target] = lines.length ? ['أضف منتجاً آخر، أو اضغط تأكيد للدفع', '#pay'] : ['ابحث عن المنتج برقمه أو باسمه', '#pk'];
     else if (!$('#qt').value) [text, target] = ['اكتب الكمية المشتراة', '#qt'];
     else if (!$('#pa').value && !$('#pa').disabled) [text, target] = ['اكتب سعر الشراء', '#pa'];
     else [text, target] = ['اضغط إضافة', '#addl'];
-    const note = $('#note'); if (note) note.textContent = text;
-    $(target)?.classList.add('next');
+    setNext(text, target);
   }
   // product search / selection
   function lockFields() {
@@ -149,7 +146,7 @@ export async function renderPurchase(app) {
     const neg = r.warnings.some((w) => w.type === 'CASH_NEGATIVE');
     showStrip({ warn: neg, ms: 15000,
       html: `✔ ${esc(r.invoice.invoice_no)} · <b>${money(r.invoice.total)}</b>${r.invoice.credit_amount ? ` · دين للمورد ${money(r.invoice.credit_amount)}` : ''}${neg ? '<br>⚠ رصيد الصندوق سالب' : ''}`,
-      actions: msg?.link ? [{ label: 'واتساب', cls: 'gold', onClick: () => { window.open(msg.link, '_blank'); eng.share.markSent(msg.invoice_id).catch(() => {}); } }] : [] });
+      actions: msg?.link ? [{ label: 'واتساب', cls: 'gold', onClick: () => sendWhatsApp(eng, msg) }] : [] });
   }
   const cp = codePicker(app, $('#newbox'), { taken: () => lines.filter((l) => l.sel.isNew).map((l) => l.code) });
   $('#pa').addEventListener('input', () => { if (sel?.isNew && !pvTouched) $('#pv').value = suggestSale(cp.cat, $('#pa').value); });

@@ -1,5 +1,5 @@
 // Expenses: amount + free description, taken out of the till immediately.
-import { mount, $, esc, header, toast, errText, money, fmtWhen } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, money, fmtWhen, setNext } from './ui-core.js';
 
 export async function renderExpenses(app) {
   const eng = app.engine, pc = document.body.classList.contains('pcmode');      // computer: form | list side by side
@@ -19,10 +19,8 @@ export async function renderExpenses(app) {
   // computer: the program points to the next step (notice in the top bar + pulsing target)
   function nextStep() {
     if (!pc) return;
-    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
     const [text, target] = !$('#amt').value ? ['اكتب مبلغ المصروف', '#amt'] : !$('#desc').value.trim() ? ['اكتب وصف المصروف', '#desc'] : ['اضغط تسجيل المصروف', '#go'];
-    const note = $('#note'); if (note) note.textContent = text;
-    $(target).classList.add('next');
+    setNext(text, target);
   }
   ['amt', 'desc'].forEach((id) => $(`#${id}`).addEventListener('input', nextStep));
 

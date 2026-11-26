@@ -47,7 +47,16 @@ app.startSession = async (session) => {
   app.go('home');
 };
 app.refreshCfg = async () => { app.cfg = await app.engine.settings.get(); };
-app.logout = () => { app.session = null; app.engine = null; app.go('login'); };
+// exit: closes the program. A browser may refuse to close a page it did not open: then a clear screen says so.
+app.exit = () => {
+  app.session = null; app.engine = null;
+  window.close();
+  setTimeout(() => {
+    document.body.classList.remove('pcmode');
+    document.getElementById('app').innerHTML = '<div class="center"><img src="logo.png" alt=""><div>يمكنك الآن إغلاق التطبيق</div><button class="btn gold big" id="reopen" style="min-width:200px">العودة للبرنامج</button></div>';
+    document.getElementById('reopen').onclick = () => location.reload();
+  }, 300);
+};
 
 // ------------------------------------------------------------- sync indicator (a dot in every header)
 const SYNC_TIP = { off: '', idle: 'متزامن', syncing: 'جارٍ المزامنة…', offline: 'بلا إنترنت — ستتم المزامنة تلقائياً', error: 'خطأ في المزامنة', badcode: 'رمز الربط غير صحيح' };

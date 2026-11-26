@@ -1,6 +1,6 @@
 // Read-side: balances and live store value are SUMS of the ledgers (never stored numbers).
 import { lineCents } from './money.js';
-import { getSetting, checkInvoice, remainingDebt, openInvoices, GOODS_TYPES } from './post.js';
+import { getSetting, checkInvoice, remainingDebt, openInvoices } from './post.js';
 import { dayParts } from './invoice-number.js';
 import { normPhone } from './phone.js';
 
@@ -42,7 +42,7 @@ async function detailCustomers(tx) {
 export function queriesApi(ctx) {
   const { store } = ctx;
   // reading invoices is needed by sales, returns, debts and the details of quick sales: any of these rights is enough
-  const seeInvoices = () => { if (!['view_invoices', 'quick_sale', 'return_customer', 'return_supplier', 'collect_debt', 'pay_supplier', 'expense', 'cash_count'].some((k) => ctx.access.can(k))) seeInvoices(); };
+  const seeInvoices = () => { if (!['view_invoices', 'quick_sale', 'return_customer', 'return_supplier', 'collect_debt', 'pay_supplier', 'expense', 'cash_count'].some((k) => ctx.access.can(k))) ctx.access.require('view_invoices'); };
   const ownerRead = async (fn) => { ctx.access.requireOwner(); return store.transaction(fn); };
   return {
     cashBalance: () => ownerRead(cashBalance),
@@ -187,4 +187,3 @@ export function queriesApi(ctx) {
 }
 const strip = (ctx, i) => ctx.access.can('view_cost_profit') ? i : (({ cost_total, profit, profit_pct_applied, ...r }) => r)(i);
 const stripLine = (ctx, l) => ctx.access.can('view_cost_profit') ? l : (({ unit_cost, line_cost, ...r }) => r)(l);
-export { GOODS_TYPES };

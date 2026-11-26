@@ -1,6 +1,6 @@
 // Till. Employee: opening balance + BLIND closing count (he never sees the expected balance).
 // Owner: expected balance live, closing history with differences, deposit / withdrawal.
-import { mount, $, esc, header, toast, errText, openModal, money, fmtWhen } from './ui-core.js';
+import { mount, $, header, toast, errText, openModal, money, fmtWhen, setNext } from './ui-core.js';
 
 export async function renderCash(app) {
   const pc = document.body.classList.contains('pcmode');
@@ -11,10 +11,8 @@ export async function renderCash(app) {
   // computer: the program points to the next step (notice in the top bar + pulsing target)
   function nextStep(st) {
     if (!pc) return;
-    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
     const [text, target] = !st.open ? ['ابدأ جلسة الصندوق', '#open'] : !$('#counted').value ? ['اعدّ النقود في الصندوق ثم اكتب المبلغ', '#counted'] : ['اضغط إغلاق الصندوق', '#close'];
-    const note = $('#note'); if (note) note.textContent = text;
-    $(target)?.classList.add('next');
+    setNext(text, target);
   }
 
   async function draw() {

@@ -1,5 +1,5 @@
 // Administration (owner only): live store value, store settings, employees & permissions, reset.
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, qtyStr } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, qtyStr, download, fmtWhen } from './ui-core.js';
 import { APP_VERSION } from './version.js';
 import { renderInvoice } from './invoice-text.js';
 import { DEFAULT_SETTINGS } from './settings.js';
@@ -72,7 +72,7 @@ export async function renderAdmin(app) {
         <button class="btn" id="addEmp" style="margin-top:8px;width:100%">+ إضافة موظف</button></div>
 
       <div class="card"><div class="grp" style="margin-top:0">النسخ الاحتياطي</div>
-        <div class="kv"><span>آخر نسخة</span><b style="color:${last && (Date.now() - new Date(last)) < 3 * 864e5 ? 'var(--ok)' : 'var(--amber)'}">${last ? new Date(last).toLocaleString('ar-MA-u-nu-latn', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'لم تُحفظ أي نسخة'}</b></div>
+        <div class="kv"><span>آخر نسخة</span><b style="color:${last && (Date.now() - new Date(last)) < 3 * 864e5 ? 'var(--ok)' : 'var(--amber)'}">${last ? fmtWhen(last) : 'لم تُحفظ أي نسخة'}</b></div>
         <div class="row" style="margin-top:8px"><button class="btn gold" id="export" style="flex:1">⬇ حفظ نسخة احتياطية</button>
           ${canShare ? '<button class="btn" id="share" style="flex:1">مشاركة</button>' : ''}</div>
         <button class="btn" id="restore" style="width:100%;margin-top:8px">⬆ استعادة من ملف</button>
@@ -137,9 +137,7 @@ export async function renderAdmin(app) {
     }
     $('#export').onclick = async () => {
       try {
-        const f = await makeFile(), a = document.createElement('a');
-        a.href = URL.createObjectURL(f); a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 5000); toast('تم حفظ النسخة الاحتياطية'); draw();
+        const f = await makeFile(); download(f, f.name); toast('تم حفظ النسخة الاحتياطية'); draw();
       } catch (e) { toast(errText(e), true); }
     };
     $('#share')?.addEventListener('click', async () => {
@@ -233,9 +231,7 @@ export async function renderAdmin(app) {
         buttons: [{ label: 'إلغاء' }, { label: 'حفظ نسخة ثم تصفير', cls: 'red', onClick: async (close, m) => {
           if (m.querySelector('#w').value.trim() !== 'تصفير') { m.querySelector('#err').textContent = 'اكتب الكلمة كما هي'; return false; }
           try {
-            const f = await makeFile(), a = document.createElement('a');                       // safety copy first
-            a.href = URL.createObjectURL(f); a.download = `avant-reset-stock-${f.name}`; document.body.appendChild(a); a.click(); a.remove();
-            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            const f = await makeFile(); download(f, `avant-reset-stock-${f.name}`);                // safety copy first
             const r = await eng.admin.resetStock(); toast(`تم تصفير المخزون · حُذف ${r.products_removed} منتج`, false, 3500); draw();
           } catch (e) { m.querySelector('#err').textContent = errText(e); return false; }
         } }],

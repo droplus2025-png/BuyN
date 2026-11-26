@@ -91,3 +91,18 @@ button.pressed{background:#22d3ee!important;color:#00175f!important;border-color
 .split3{display:grid;grid-template-columns:150px minmax(0,1fr) minmax(0,1.05fr);gap:14px;min-height:0;flex:1}
 .split-filters .chips{flex-direction:column;flex-wrap:nowrap;gap:8px;overflow:visible}
 .split-filters .chip{width:100%;padding:14px 8px;font-size:1.05rem;text-align:center}
+
+/* Font on the computer. Arabic letters: Noto Naskh Arabic (bundled, SIL OFL, see OFL-NotoNaskhArabic.txt).
+   Latin letters and digits (prices, codes, product names): Tajawal, else Dubai, else Segoe UI when installed. */
+@font-face{font-family:'buyN';font-weight:400;font-display:swap;src:url(NotoNaskhArabic-Regular.woff) format('woff');unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'buyN';font-weight:500;font-display:swap;src:url(NotoNaskhArabic-Medium.woff) format('woff');unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'buyN';font-weight:600;font-display:swap;src:url(NotoNaskhArabic-SemiBold.woff) format('woff');unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'buyN';font-weight:700;font-display:swap;src:url(NotoNaskhArabic-Bold.woff) format('woff');unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'buyN';font-weight:800;font-display:swap;src:url(NotoNaskhArabic-Bold.woff) format('woff');unicode-range:U+0600-06FF,U+0750-077F,U+08A0-08FF,U+FB50-FDFF,U+FE70-FEFF}
+@font-face{font-family:'buyN';font-weight:400;src:local('Tajawal Regular'),local('Tajawal'),local('Dubai'),local('Segoe UI');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+20AC}
+@font-face{font-family:'buyN';font-weight:500;src:local('Tajawal Medium'),local('Dubai Medium'),local('Segoe UI Semibold');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+20AC}
+@font-face{font-family:'buyN';font-weight:600;src:local('Tajawal Bold'),local('Dubai Bold'),local('Segoe UI Semibold');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+20AC}
+@font-face{font-family:'buyN';font-weight:700;src:local('Tajawal Bold'),local('Dubai Bold'),local('Segoe UI Bold');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+20AC}
+@font-face{font-family:'buyN';font-weight:800;src:local('Tajawal ExtraBold'),local('Tajawal Bold'),local('Dubai Bold'),local('Segoe UI Bold');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+2000-206F,U+20AC}
+body.pcmode{font-family:'buyN',"Tajawal","Dubai","Segoe UI",system-ui,-apple-system,Roboto,Tahoma,sans-serif}
+html:has(body.pcmode){font-size:17px}   /* Naskh letters have a small x-height: a little more size keeps them as readable as a sans font */

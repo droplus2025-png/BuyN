@@ -1,4 +1,5 @@
 // Small UI helpers: DOM, toast, top-aligned modal, Arabic error messages, header.
+import { fmtMoney, fmtPrice, fmtQty } from './money.js';
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -74,13 +75,33 @@ export const confirmBox = (title, text, yes = 'متابعة', no = 'رجوع') =
 export function header(title, backLabel = 'رجوع') {
   return `<div class="hdr"><button class="back" id="hdrBack">→ ${esc(backLabel)}</button><div class="title">${esc(title)}<span class="sdot off"></span></div><img class="logo" src="logo.png" alt=""></div>`;
 }
-export const money = (cents) => {
-  const neg = cents < 0, a = Math.abs(cents);
-  const s = `${Math.floor(a / 100)}.${String(a % 100).padStart(2, '0')}`.replace(/\.00$/, '');
-  return (neg ? '-' : '') + s;
-};
-export const price4 = (p) => (p / 10000).toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
-export const qtyStr = (q) => (q / 1000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+// display formats come from the engine's own functions (money.js): one definition only
+export const money = fmtMoney, price4 = fmtPrice, qtyStr = fmtQty;
+
+// a number computed on screen that may be incomplete while typing: never throws
+export const safe = (fn, dflt = 0) => { try { return fn(); } catch { return dflt; } };
+
+// save a Blob / File through the browser's download
+export function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// open an invoice message in WhatsApp (the customer's chat when known) and remember it was sent
+export function sendWhatsApp(eng, msg) {
+  const w = window.open(msg.link || `https://wa.me/?text=${encodeURIComponent(msg.text)}`, '_blank');
+  eng.share.markSent(msg.invoice_id).catch(() => {});
+  return w;
+}
+
+// computer: the program points to the next step (notice in the top bar + pulsing target)
+export function setNext(text, target) {
+  document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
+  const note = $('#note'); if (note) note.textContent = text;
+  if (target) document.querySelector(target)?.classList.add('next');
+}
 
 export const TYPE_AR = { sale: 'بيع', quick_sale: 'بيع سريع', quick_detail: 'تفصيل', purchase: 'شراء', deposit: 'إيداع', withdrawal: 'سحب',
   expense: 'مصروف', return_customer: 'إرجاع من زبون', return_supplier: 'إرجاع للمورد', collect: 'قبض دين', pay_supplier: 'دفع للمورد',

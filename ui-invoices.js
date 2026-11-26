@@ -1,7 +1,7 @@
 // Invoices archive: search, filters, detail, WhatsApp, and product details for quick sales.
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, price4, qtyStr, TYPE_AR, fmtWhen, fmtTime, priceShort, partySuggest } from './ui-core.js';
-import { money as M } from './index.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, price4, qtyStr, TYPE_AR, fmtTime, priceShort, partySuggest, sendWhatsApp, setNext } from './ui-core.js';
 import { openExternal } from './ui-external.js';
+import { printText } from './print.js';
 
 // modal showing the formatted text invoice with a WhatsApp button (used by other screens too)
 export async function showInvoice(app, idOrNo) {
@@ -11,8 +11,7 @@ export async function showInvoice(app, idOrNo) {
   openModal({
     title: 'الفاتورة', tall: true,
     html: `<pre dir="auto" style="white-space:pre-wrap;margin:0;font:inherit;line-height:1.6;user-select:text">${esc(msg.text)}</pre>`,
-    buttons: [{ label: 'إغلاق' }, { label: 'واتساب', cls: 'gold', onClick: () => {
-      window.open(msg.link || `https://wa.me/?text=${encodeURIComponent(msg.text)}`, '_blank'); eng.share.markSent(msg.invoice_id).catch(() => {}); } }],
+    buttons: [{ label: 'إغلاق' }, { label: 'طباعة', onClick: () => { printText(msg.text); return false; } }, { label: 'واتساب', cls: 'gold', onClick: () => sendWhatsApp(eng, msg) }],
   });
 }
 
@@ -57,12 +56,10 @@ export async function renderInvoices(app, params = {}) {
   }
   // computer: the program points to the next step (notice in the top bar + pulsing target)
   async function nextStep(rows) {
-    document.querySelectorAll('.next').forEach((x) => x.classList.remove('next'));
-    const note = $('#note'); if (!note) return;
     const n = (await eng.reports.pendingQuickSales().catch(() => ({ count: 0 }))).count;
-    if (n && filter !== 'pending') { note.textContent = `⏳ ${n} فواتير سريعة بانتظار التفاصيل — المس «بدون تفاصيل»`; document.querySelector('.chip[data-k="pending"]')?.classList.add('next'); }
-    else if (n) { note.textContent = 'المس فاتورة لإضافة تفاصيل منتجاتها'; document.querySelector('#main .res')?.classList.add('next'); }
-    else note.textContent = rows.length ? 'المس فاتورة لعرضها وإرسالها' : '';
+    if (n && filter !== 'pending') setNext(`⏳ ${n} فواتير سريعة بانتظار التفاصيل — المس «بدون تفاصيل»`, '.chip[data-k="pending"]');
+    else if (n) setNext('المس فاتورة لإضافة تفاصيل منتجاتها', '#main .res');
+    else setNext(rows.length ? 'المس فاتورة لعرضها وإرسالها' : '', null);
   }
   let t; $('#q').addEventListener('input', () => { clearTimeout(t); t = setTimeout(list, 150); });
   $('#chips').addEventListener('click', (e) => { const b = e.target.closest('.chip'); if (!b) return; filter = b.dataset.k;
@@ -83,9 +80,10 @@ export async function renderInvoices(app, params = {}) {
     out().innerHTML = `
       <div class="inv-paper">${msg.text.split('\n').map((ln) => `<div dir="auto">${esc(ln) || '&nbsp;'}</div>`).join('')}</div>
       ${inner ? `<div class="card">${inner}</div>` : ''}
-      <div class="row"><button class="btn gold big" id="wa" style="flex:1">واتساب / نسخ</button>
-        ${d.quick_pending && can.quick_sale ? '<button class="btn amber big" id="det" style="flex:1">إضافة التفاصيل</button>' : ''}</div>`;
-    $('#wa').onclick = () => { window.open(msg.link || `https://wa.me/?text=${encodeURIComponent(msg.text)}`, '_blank'); eng.share.markSent(msg.invoice_id).catch(() => {}); };
+      <div class="row"><button class="btn gold big" id="wa" style="flex:1">واتساب / نسخ</button><button class="btn big" id="prt" style="flex:1">🖨 طباعة</button></div>
+      ${d.quick_pending && can.quick_sale ? '<button class="btn amber big" id="det">إضافة التفاصيل</button>' : ''}`;
+    $('#wa').onclick = () => sendWhatsApp(eng, msg);
+    $('#prt').onclick = () => printText(msg.text);
     $('#det')?.addEventListener('click', () => editDetails(d));
   }
 
@@ -215,9 +213,7 @@ export async function renderInvoices(app, params = {}) {
         if (send) {                                          // save and send: the invoice goes to WhatsApp right away
           const msg = await eng.share.invoiceMessage(inv.invoice_no).catch(() => null);
           if (msg) {
-            const w = window.open(msg.link || `https://wa.me/?text=${encodeURIComponent(msg.text)}`, '_blank');
-            eng.share.markSent(msg.invoice_id).catch(() => {});
-            if (!w) showInvoice(app, inv.id);                // popup refused: show the invoice with its WhatsApp button
+            if (!sendWhatsApp(eng, msg)) showInvoice(app, inv.id);                // popup refused: show the invoice with its WhatsApp button
           }
         }
         if (pc) { list(); detail(d.invoice.id); } else if (direct) list(); else detail(d.invoice.id);
