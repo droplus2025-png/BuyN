@@ -6,7 +6,7 @@ import { SUPABASE } from './sync-config.js';
 import { APP_VERSION } from './version.js';
 import './viewport.js';
 import { toast } from './ui-core.js';
-import { renderLogin, renderSetup } from './ui-login.js';
+import { renderLogin, renderSetup, renderLocked } from './ui-login.js';
 import { renderHome, renderSoon } from './ui-home.js';
 import { renderPc, ensureShell, menuOf } from './ui-pc.js';
 import { renderSale } from './ui-sale.js';
@@ -59,7 +59,7 @@ app.exit = () => {
 };
 
 // ------------------------------------------------------------- sync indicator (a dot in every header)
-const SYNC_TIP = { off: '', idle: 'متزامن', syncing: 'جارٍ المزامنة…', offline: 'بلا إنترنت — ستتم المزامنة تلقائياً', error: 'خطأ في المزامنة', badcode: 'رمز الربط غير صحيح' };
+const SYNC_TIP = { off: '', idle: 'متزامن', syncing: 'جارٍ المزامنة…', offline: 'بلا إنترنت — ستتم المزامنة تلقائياً', error: 'خطأ في المزامنة', badcode: 'مفتاح الجهاز غير صحيح', revoked: 'تم فصل هذا الجهاز' };
 function paintSync(s) {
   document.querySelectorAll('.sdot').forEach((el) => {
     el.className = `sdot ${s.state}${s.pending ? ' pend' : ''}`;
@@ -80,21 +80,50 @@ async function checkUpdate() {
 }
 function applyUpdate() { toast('تم تحديث البرنامج'); setTimeout(() => location.reload(), 600); }
 
+// PHASE 1: no activation and no password yet (both come in the last phase) -> straight in as owner with a fixed internal code
+const DEV = 'buyN-open', LOCK_KEY = 'buyn_locked';
+
+// first launch, a new shop on this device (it can become the main device later, from Administration)
+app.startLocal = async () => {
+  await app.auth.setupOwner({ name: 'المالك', code: DEV });
+  return app.startSession(await app.auth.login(DEV));
+};
+// the shop was downloaded (joined / recovered): the owner account came with it
+app.openDownloaded = async () => {
+  if (!(await app.auth.hasOwner())) { await app.sync.unlink(); throw Object.assign(new Error('SERVER_EMPTY'), { kind: 'server' }); }
+  return app.startSession(await app.auth.login(DEV));
+};
+// the main device disconnected this device. lock: program locked, data kept. wipe: data erased, then the first screen.
+app.onRevoked = async (mode) => {
+  app.sync.stop();
+  app.session = null; app.engine = null;
+  if (mode === 'wipe') {
+    await app.sync.confirmWipe();
+    await app.persist.wipeAll();
+    for (const k of ['buyn_device_id', 'buyn_sync_auth', LOCK_KEY]) localStorage.removeItem(k);
+    renderLocked(app, { mode: 'wipe' });
+  } else {
+    localStorage.setItem(LOCK_KEY, '1');
+    await app.sync.unlink();
+    renderLocked(app, { mode: 'lock' });
+  }
+};
+
 async function boot() {
   const persist = await openPersist('buyn-db');
   const state = await persist.load();
   app.persist = persist;
   app.store = createMemoryStore(Object.keys(state).length ? state : undefined, { persist: persist.persist });
   app.auth = createAuth({ store: app.store });
-  app.sync = createSync({ store: app.store, meta: persist.meta, transport: supabaseTransport(SUPABASE), deviceId });
+  app.sync = createSync({ store: app.store, meta: persist.meta, transport: supabaseTransport(SUPABASE), deviceId, onRevoked: (mode) => app.onRevoked(mode) });
   app.sync.onStatus(paintSync);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });
   setInterval(checkUpdate, 60 * 60 * 1000);
   checkUpdate();
-  // PHASE 1: no activation and no password yet (both come in the last phase) -> straight in as owner with a fixed internal code
-  const DEV = 'buyN-open';
-  if (!(await app.auth.hasOwner())) await app.auth.setupOwner({ name: 'المالك', code: DEV });
+  app.sync.start();
+  if (localStorage.getItem(LOCK_KEY)) return renderLocked(app, { mode: 'lock' });            // this device was disconnected (locked): nothing opens until it joins again
+  if (!(await app.auth.hasOwner())) return app.go('setup');                                // a new device: create a shop here, join one, or recover one
   app.startSession(await app.auth.login(DEV));
 }
 boot().catch((e) => { console.error(e); document.getElementById('app').innerHTML = `<div class="center"><div class="err">تعذّر تشغيل البرنامج: ${e.message}</div></div>`; });

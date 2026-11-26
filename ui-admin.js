@@ -1,9 +1,8 @@
 // Administration (owner only): live store value, store settings, employees & permissions, reset.
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, qtyStr, download, fmtWhen } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, qtyStr, download, fmtWhen, syncErrText, deviceName } from './ui-core.js';
 import { APP_VERSION } from './version.js';
 import { renderInvoice } from './invoice-text.js';
 import { DEFAULT_SETTINGS } from './settings.js';
-import { linkCode } from './sync.js';
 
 const GROUPS = { sales: 'البيع', purchases: 'الشراء', returns: 'الإرجاع', money: 'المال والصندوق', stock: 'المخزون', other: 'أخرى' };
 
@@ -25,7 +24,7 @@ export async function renderAdmin(app) {
     const cn = (d) => (d === 'x' ? 'خارج المخزون' : (c.categories || {})[d] || 'بدون اسم');
     const maxRev = Math.max(1, ...cs.cats.map((x) => x.revenue)), best = [...cs.cats].filter((x) => x.cat !== 'x' && x.profit > 0).sort((a, b) => b.profit - a.profit)[0];
     const idle = cs.cats.filter((x) => x.cat !== 'x' && x.stock_count && x.revenue <= 0);
-    const tpl = c.invoice_template, canShare = !!(navigator.canShare && navigator.canShare({ files: [new File(['{}'], 'x.json', { type: 'application/json' })] }));
+    const role = app.sync.role, tpl = c.invoice_template, canShare = !!(navigator.canShare && navigator.canShare({ files: [new File(['{}'], 'x.json', { type: 'application/json' })] }));
     $('#b').innerHTML = `
       <div class="card"><div class="grp" style="margin-top:0">تقرير اليوم</div>
         <div class="kv"><span>المبيعات (${t.sales_count} فاتورة)</span><b>${money(t.sales_total)}</b></div>
@@ -79,14 +78,15 @@ export async function renderAdmin(app) {
         <input type="file" id="restoreFile" accept=".json,application/json" style="display:none">
         <div class="muted" style="font-size:.78rem;margin-top:6px">الملف يحوي كل البيانات وبصمات كلمات المرور. احفظه في مكان آمن (Drive أو واتساب لنفسك). الاستعادة تفحص الملف أولاً وتستبدل كل ما في هذا الجهاز.</div></div>
 
-      <div class="card"><div class="grp" style="margin-top:0">المزامنة بين الأجهزة</div>
+      <div class="card"><div class="grp" style="margin-top:0">المزامنة والأجهزة</div>
+        <div class="kv"><span>دور هذا الجهاز</span><b>${role === 'main' ? 'رئيسي' : role === 'linked' ? 'مرتبط' : 'غير مرتبط'}</b></div>
         <div class="kv"><span>الحالة</span><b id="syState">…</b></div>
         <div class="kv"><span>بانتظار الإرسال</span><b id="syPend">…</b></div>
         <div class="kv"><span>آخر مزامنة</span><b id="syLast">—</b></div>
-        <div class="row" style="margin-top:8px"><button class="btn gold" id="syNow" style="flex:1">مزامنة الآن</button>
-          <button class="btn" id="syLink" style="flex:1">${linkCode.get() ? 'تغيير الرمز' : 'ربط هذا الجهاز'}</button></div>
-        ${linkCode.get() ? '<button class="btn red" id="syOff" style="width:100%;margin-top:8px">فك الربط</button>' : ''}
-        <div class="muted" style="font-size:.78rem;margin-top:6px">تعمل المزامنة وحدها عند توفر الإنترنت. بدون إنترنت يستمر البرنامج بالعمل وتُرسل العمليات لاحقاً.</div></div>
+        ${role ? '<button class="btn gold" id="syNow" style="width:100%;margin-top:8px">مزامنة الآن</button>' : '<button class="btn gold" id="syMain" style="width:100%;margin-top:8px">جعل هذا الجهاز رئيسياً (ربط المحل بالسحابة)</button>'}
+        ${role === 'main' ? '<button class="btn" id="syCode" style="width:100%;margin-top:8px">+ رمز ربط جهاز جديد</button><button class="btn" id="syDevs" style="width:100%;margin-top:8px">الأجهزة المرتبطة</button>' : ''}
+        ${role === 'linked' ? '<button class="btn red" id="syOff" style="width:100%;margin-top:8px">فك ارتباط هذا الجهاز</button>' : ''}
+        <div class="muted" style="font-size:.78rem;margin-top:6px">تعمل المزامنة وحدها عند توفر الإنترنت. بدون إنترنت يستمر البرنامج بالعمل وتُرسل العمليات لاحقاً. الجهاز الرئيسي وحده يربط الأجهزة ويفصلها.</div></div>
 
       <div class="card" style="grid-column:1/-1"><div class="grp" style="margin-top:0">شكل الفاتورة (واتساب)</div>
         <div class="tplgrid">
@@ -181,28 +181,34 @@ export async function renderAdmin(app) {
         await app.refreshCfg(); toast('تم حفظ الإعدادات');
       } catch (e) { toast(errText(e), true, 3000); }
     };
-    // ---- sync card
-    const SY = { off: 'غير مرتبط', idle: 'متزامن ✔', syncing: 'جارٍ المزامنة…', offline: 'بلا إنترنت', error: 'خطأ', badcode: 'رمز الربط غير صحيح' };
+    // ---- sync card: the main device makes link codes and disconnects devices
+    const SY = { off: 'غير مرتبط', idle: 'متزامن ✔', syncing: 'جارٍ المزامنة…', offline: 'بلا إنترنت', error: 'خطأ', badcode: 'مفتاح الجهاز غير صحيح', revoked: 'مفصول' };
     const paintSy = (s) => {
       if (!$('#syState')) return;
       $('#syState').textContent = SY[s.state] + (s.error && s.state === 'error' ? ` (${s.error.slice(0, 40)})` : '');
       $('#syPend').textContent = s.pending; $('#syLast').textContent = s.last ? new Date(s.last).toLocaleTimeString('ar-MA-u-nu-latn', { hour: '2-digit', minute: '2-digit' }) : '—';
     };
     app.syncHook = paintSy; paintSy(app.sync.status);
-    $('#syNow').onclick = async () => { if (!linkCode.get()) return toast('اربط الجهاز أولاً', true); await app.sync.syncNow(); };
-    $('#syLink').onclick = () => openModal({
-      title: 'رمز ربط المحل', html: `<div class="muted">الرمز الذي أنشأته في قاعدة البيانات. يُدخل مرة واحدة في كل جهاز.</div>
-        <input id="lc" class="inp" placeholder="رمز الربط" autocomplete="off" style="direction:ltr;text-align:center"><div class="err" id="err"></div>`,
+    $('#syNow')?.addEventListener('click', () => app.sync.syncNow());
+    $('#syMain')?.addEventListener('click', () => openModal({
+      title: 'جعل هذا الجهاز رئيسياً', html: `<div class="muted">يُنشأ المحل في السحابة وتُرفع إليه كل بيانات هذا الجهاز. يلزم مفتاح الإعداد السري الذي وضعتَه في قاعدة البيانات.</div>
+        <input id="sk" class="inp" type="password" placeholder="مفتاح الإعداد" autocomplete="off" style="direction:ltr"><div class="lbl">اسم هذا الجهاز</div><input id="dn" class="inp" value="${esc(deviceName())}" autocomplete="off"><div class="err" id="err"></div>`,
       buttons: [{ label: 'إلغاء' }, { label: 'ربط', cls: 'gold', onClick: async (close, m) => {
         const btn = m.querySelector('.mbtns .gold'); btn.disabled = true; btn.textContent = 'جارٍ الإرسال…';
-        try { await app.sync.linkMain(m.querySelector('#lc').value.trim()); toast('تم الربط'); draw(); }
-        catch (e) {
-          m.querySelector('#err').textContent = e.kind === 'badcode' ? 'رمز الربط غير صحيح' : e.message === 'SERVER_NOT_EMPTY' ? 'هذا المحل في السحابة يحوي بيانات من جهاز آخر؛ لا يمكن ربط جهاز له بيانات مستقلة. اربط جهازاً جديداً من شاشة الإعداد الأول.' : e.kind === 'network' ? 'لا يوجد اتصال بالإنترنت' : errText(e);
-          btn.disabled = false; btn.textContent = 'ربط'; return false;
-        }
-      } }], onOpen: (m) => m.querySelector('#lc').focus() });
+        try { await app.sync.makeMain(m.querySelector('#sk').value, m.querySelector('#dn').value.trim() || deviceName()); toast('تم الربط: هذا الجهاز هو الرئيسي'); draw(); }
+        catch (e) { m.querySelector('#err').textContent = syncErrText(e); btn.disabled = false; btn.textContent = 'ربط'; return false; }
+      } }], onOpen: (m) => m.querySelector('#sk').focus() }));
+    $('#syCode')?.addEventListener('click', async () => {
+      try {
+        const { code, expires_at: exp } = await app.sync.pairingCode();
+        openModal({ title: 'رمز ربط جهاز جديد', html: `<div class="muted" style="text-align:center">أدخله في الجهاز الجديد (شاشة «ربط بالجهاز الرئيسي»). صالح 10 دقائق ولمرة واحدة.</div>
+          <div style="font-size:2.4rem;font-weight:900;color:var(--gold);text-align:center;direction:ltr;letter-spacing:4px">${esc(code.slice(0, 4))} ${esc(code.slice(4))}</div>
+          <div class="muted" style="text-align:center">ينتهي ${esc(new Date(exp).toLocaleTimeString('ar-MA-u-nu-latn', { hour: '2-digit', minute: '2-digit' }))}</div>`, buttons: [{ label: 'إغلاق', cls: 'gold' }] });
+      } catch (e) { toast(syncErrText(e), true, 3500); }
+    });
+    $('#syDevs')?.addEventListener('click', () => devices());
     $('#syOff')?.addEventListener('click', async () => {
-      if (!(await confirmBox('فك الربط', 'يتوقف هذا الجهاز عن المزامنة وتبقى بياناته كما هي. متابعة؟', 'فك الربط', 'إلغاء'))) return;
+      if (!(await confirmBox('فك الارتباط', 'يتوقف هذا الجهاز عن المزامنة وتبقى بياناته كما هي، ولن يتمكن من الانضمام إلا برمز ربط جديد. متابعة؟', 'فك الارتباط', 'إلغاء'))) return;
       await app.sync.unlink(); draw();
     });
     $('#addEmp').onclick = () => openModal({
@@ -241,6 +247,30 @@ export async function renderAdmin(app) {
       if (!(await confirmBox('تصفير العمليات', 'ستُحذف كل الفواتير والزبناء والموردين والصندوق. تبقى المنتجات والمخزون. متابعة؟', 'تصفير', 'إلغاء'))) return;
       try { const r = await eng.admin.resetOperations(); toast(`تم التصفير · ${r.products_kept} منتج محفوظ`); draw(); } catch (e) { toast(errText(e), true); }
     };
+  }
+
+  // the devices of the shop (main device): who, when last seen, disconnect with the owner's choice (lock / wipe)
+  async function devices() {
+    let list;
+    try { list = await app.sync.devices(); } catch (e) { return toast(syncErrText(e), true, 3500); }
+    const ST = (d) => (d.status === 'active' ? '<span class="pill">نشط</span>' : d.revoke_mode === 'wipe' ? `<span class="pill amber">${d.wipe_confirmed_at ? 'مفصول · مُسحت بياناته' : 'مفصول · بانتظار المسح'}</span>` : '<span class="pill amber">مفصول · مقفل</span>');
+    const me = list.find((d) => d.role === 'main' && d.status === 'active');
+    openModal({ title: 'الأجهزة المرتبطة', tall: true,
+      html: `<div class="muted" style="font-size:.78rem">معرّف المحل: <span dir="ltr" style="user-select:text">${esc(app.sync.shopId || '')}</span></div>`
+        + list.map((d) => `<div class="sw"><span>${esc(d.name || d.id)} <span class="muted">(${d.role === 'main' ? 'رئيسي' : 'مرتبط'})</span><br><span class="muted" style="font-size:.78rem">${d.last_seen_at ? 'آخر ظهور ' + fmtWhen(d.last_seen_at) : 'لم يتصل بعد'}</span></span>
+          <span class="row">${ST(d)}${d.status === 'active' && d !== me && d.role !== 'main' ? `<button class="btn red" data-rv="${esc(d.id)}">فصل</button>` : ''}</span></div>`).join(''),
+      buttons: [{ label: 'إغلاق', cls: 'gold' }],
+      onOpen: (m) => m.querySelectorAll('[data-rv]').forEach((b) => b.addEventListener('click', () => revoke(b.dataset.rv, list.find((d) => d.id === b.dataset.rv)))) });
+  }
+  function revoke(id, d) {
+    openModal({ title: `فصل ${d?.name || 'الجهاز'}`,
+      html: `<div>اختر ما يحدث لبيانات المحل على هذا الجهاز عند أول اتصال له بالإنترنت:</div>
+        <div class="muted" style="font-size:.85rem"><b>قفل:</b> يُقفل البرنامج وتبقى البيانات مخزّنة (يعود بعد رمز ربط جديد).<br><b>مسح:</b> تُمسح كل بيانات المحل من الجهاز نهائياً.<br>إن كان الجهاز بلا إنترنت فيعمل محلياً حتى يتصل.</div>`,
+      buttons: [{ label: 'إلغاء' }, { label: 'قفل فقط', cls: 'gold', onClick: () => doRevoke(id, 'lock') }, { label: 'مسح البيانات', cls: 'red', onClick: () => doRevoke(id, 'wipe') }] });
+  }
+  async function doRevoke(id, mode) {
+    try { await app.sync.revoke(id, mode); toast(mode === 'wipe' ? 'تم الفصل: ستُمسح بياناته عند اتصاله' : 'تم الفصل: سيُقفل عند اتصاله'); }
+    catch (e) { toast(syncErrText(e), true, 3500); }
   }
 
   // permissions of one employee, chosen by the owner

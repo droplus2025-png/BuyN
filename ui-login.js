@@ -1,4 +1,4 @@
-import { mount, $, toast, errText, openModal } from './ui-core.js';
+import { mount, $, toast, errText, openModal, syncErrText, deviceName } from './ui-core.js';
 
 export function renderLogin(app) {
   mount(`<div class="screen"><div class="center">
@@ -16,36 +16,47 @@ export function renderLogin(app) {
   $('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
 }
 
+// first launch on a NEW device: a shop on this device, join the shop of a main device, or take the place of a lost main device
 export function renderSetup(app) {
   mount(`<div class="screen"><div class="center">
     <img src="logo.png" alt=""><h2 style="margin:0;color:var(--gold)">الإعداد الأول</h2>
-    <div class="muted">أنشئ كلمة مرور المالك (4 أحرف على الأقل)</div>
-    <input id="name" class="inp" placeholder="اسمك" style="max-width:300px">
-    <input id="c1" class="inp" type="password" placeholder="كلمة المرور" style="max-width:300px">
-    <input id="c2" class="inp" type="password" placeholder="أعد كلمة المرور" style="max-width:300px">
+    <button class="btn gold big" id="local" style="min-width:260px">محل جديد على هذا الجهاز</button>
+    <button class="btn big" id="join" style="min-width:260px">ربط بالجهاز الرئيسي (رمز ربط)</button>
+    <button class="btn" id="recover" style="min-width:260px">استرجاع المحل (الجهاز الرئيسي ضاع)</button>
     <div class="err" id="err"></div>
-    <button class="btn gold big" id="go" style="min-width:200px">إنشاء</button>
-    <button class="btn" id="join" style="min-width:200px">لدي محل مرتبط — إضافة هذا الجهاز</button>
   </div></div>`);
-  // second / third device: download the whole shop with the link code, then log in with the existing code
-  $('#join').onclick = () => openModal({
-    title: 'ربط هذا الجهاز بمحل', html: `<div class="muted">أدخل رمز ربط المحل (نفسه في كل الأجهزة). يلزم اتصال بالإنترنت لمرة واحدة.</div>
-      <input id="lc" class="inp" placeholder="رمز الربط" autocomplete="off" style="direction:ltr;text-align:center"><div class="err" id="err"></div>`,
-    buttons: [{ label: 'إلغاء' }, { label: 'ربط', cls: 'gold', onClick: async (close, m) => {
+  $('#local').onclick = async () => { try { await app.startLocal(); } catch (e) { $('#err').textContent = errText(e); } };
+  const ask = (title, html, run) => openModal({ title, html: `${html}<div class="err" id="merr"></div>`,
+    buttons: [{ label: 'إلغاء' }, { label: 'متابعة', cls: 'gold', onClick: async (close, m) => {
       const btn = m.querySelector('.mbtns .gold'); btn.disabled = true; btn.textContent = 'جارٍ التحميل…';
-      try {
-        await app.sync.linkNew(m.querySelector('#lc').value.trim());
-        if (!(await app.auth.hasOwner())) throw Object.assign(new Error('NO_OWNER'), { kind: 'server' });
-        toast('تم تحميل بيانات المحل'); app.go('login');
-      } catch (e) {
-        app.sync.unlink();
-        m.querySelector('#err').textContent = e.kind === 'badcode' ? 'رمز الربط غير صحيح' : e.message === 'SERVER_EMPTY' ? 'المحل فارغ في السحابة: أنشئ الإعداد الأول من الجهاز الرئيسي ثم اربطه أولاً' : e.kind === 'network' ? 'لا يوجد اتصال بالإنترنت' : errText(e);
-        btn.disabled = false; btn.textContent = 'ربط'; return false;
-      }
-    } }], onOpen: (m) => m.querySelector('#lc').focus() });
+      try { await run(m); toast('تم تحميل بيانات المحل'); }
+      catch (e) { m.querySelector('#merr').textContent = syncErrText(e); btn.disabled = false; btn.textContent = 'متابعة'; return false; }
+    } }], onOpen: (m) => m.querySelector('input').focus() });
+  const nm = (m) => (m.querySelector('#dn').value.trim() || deviceName());
+  const dn = `<div class="lbl">اسم هذا الجهاز</div><input id="dn" class="inp" value="${deviceName()}" autocomplete="off">`;
+  $('#join').onclick = () => ask('ربط بالجهاز الرئيسي',
+    `<div class="muted">اطلب من الجهاز الرئيسي «رمز ربط جهاز جديد» (من الإدارة). يلزم اتصال بالإنترنت.</div><input id="lc" class="inp" inputmode="numeric" placeholder="رمز الربط (8 أرقام)" autocomplete="off" style="direction:ltr;text-align:center">${dn}`,
+    async (m) => { await app.sync.join(m.querySelector('#lc').value.trim(), nm(m)); await app.openDownloaded(); });
+  $('#recover').onclick = () => ask('استرجاع المحل',
+    `<div class="muted">يصبح هذا الجهاز هو الرئيسي ويُمسح الجهاز الرئيسي القديم. تحتاج مفتاح الإعداد السري ومعرّف المحل (موجود في جدول shops في Supabase).</div>
+      <input id="sk" class="inp" type="password" placeholder="مفتاح الإعداد" autocomplete="off" style="direction:ltr"><input id="sh" class="inp" placeholder="معرّف المحل" autocomplete="off" style="direction:ltr">${dn}`,
+    async (m) => { await app.sync.recover(m.querySelector('#sk').value, m.querySelector('#sh').value.trim(), nm(m)); await app.openDownloaded(); });
+}
+
+// this device was disconnected from the shop by the main device
+export function renderLocked(app, { mode }) {
+  document.body.classList.remove('pcmode'); document.getElementById('app').innerHTML = '';
+  const wipe = mode === 'wipe';
+  mount(`<div class="screen"><div class="center">
+    <img src="logo.png" alt=""><h2 style="margin:0;color:var(--gold)">تم فصل هذا الجهاز عن المحل</h2>
+    <div class="muted" style="text-align:center">${wipe ? 'مُسحت بيانات المحل من هذا الجهاز.' : 'البرنامج مقفل على هذا الجهاز وبياناته محفوظة. لاستعماله من جديد اطلب من الجهاز الرئيسي رمز ربط.'}</div>
+    ${wipe ? '' : `<input id="lc" class="inp" inputmode="numeric" placeholder="رمز الربط (8 أرقام)" autocomplete="off" style="max-width:300px;direction:ltr;text-align:center"><div class="err" id="err"></div>`}
+    <button class="btn gold big" id="go" style="min-width:220px">${wipe ? 'البدء من جديد' : 'ربط الجهاز'}</button>
+  </div></div>`);
   $('#go').onclick = async () => {
-    if ($('#c1').value !== $('#c2').value) { $('#err').textContent = 'كلمتا المرور غير متطابقتين'; return; }
-    try { await app.startSession(await app.auth.setupOwner({ name: $('#name').value.trim() || 'المالك', code: $('#c1').value })); toast('مرحباً'); }
-    catch (e) { $('#err').textContent = errText(e); }
+    if (wipe) return location.reload();
+    $('#go').disabled = true;
+    try { await app.sync.join($('#lc').value.trim(), deviceName()); localStorage.removeItem('buyn_locked'); location.reload(); }
+    catch (e) { $('#err').textContent = syncErrText(e); $('#go').disabled = false; }
   };
 }

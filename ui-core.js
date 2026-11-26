@@ -25,6 +25,12 @@ const ERR = {
   DETAIL_TOTAL_MISMATCH: 'يجب توزيع المبلغ كاملاً على المنتجات', ALREADY_DETAILED: 'تمت إضافة تفاصيل هذه الفاتورة من قبل', HAS_RETURNS: 'لا يمكن تفصيل فاتورة تم إرجاعها',
   BAD_PARENT: 'هذه الفاتورة لا تقبل هذه العملية', CANNOT_ALLOCATE: 'تعذّر توزيع المبلغ على هذه الكميات', INVOICE_NOT_FOUND: 'الفاتورة غير موجودة',
 };
+// refusals of the cloud sync (SyncError.kind)
+const SYNC_ERR = { badpair: 'رمز الربط غير صحيح أو منتهي أو مستعمل', badkey: 'مفتاح الإعداد غير صحيح', keynotset: 'لم يُضبط مفتاح الإعداد في قاعدة البيانات بعد',
+  throttled: 'محاولات خاطئة كثيرة، انتظر 10 دقائق', notmain: 'هذه العملية للجهاز الرئيسي فقط', network: 'لا يوجد اتصال بالإنترنت', taken: 'هذا الجهاز مسجَّل من قبل',
+  notfound: 'غير موجود', revoked: 'هذا الجهاز مفصول عن المحل', badtoken: 'مفتاح الجهاز غير صالح' };
+export const syncErrText = (e) => SYNC_ERR[e?.kind] || (e?.message === 'SERVER_EMPTY' ? 'لا توجد بيانات محل في السحابة بعد' : e?.message === 'ALREADY_LINKED' ? 'هذا الجهاز مرتبط من قبل' : errText(e));
+export const deviceName = () => (navigator.userAgentData?.mobile || /Android|iPhone|iPad/i.test(navigator.userAgent || '') ? 'هاتف' : 'حاسوب');
 export const errText = (e) => ERR[e?.code] || e?.message || 'حدث خطأ';
 
 // modal in the top half of the screen. buttons: [{label, cls, onClick(close)}]; onClick returning false keeps it open
