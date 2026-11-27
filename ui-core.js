@@ -27,7 +27,7 @@ const ERR = {
 };
 // refusals of the cloud sync (SyncError.kind)
 const SYNC_ERR = { badpair: 'رمز الربط غير صحيح أو منتهي أو مستعمل', badactivation: 'رقم الهاتف أو رمز التفعيل غير صحيح',
-  suspended: 'الترخيص موقوف، تواصل مع المزوّد', expired: 'انتهى الترخيص، تواصل مع المزوّد', limit: 'بلغت الحد الأقصى لعدد الأجهزة المسموح بها',
+  suspended: 'الترخيص موقوف، تواصل مع المزوّد', nolicense: 'هذا الجهاز مرتبط بمحل بلا ترخيص، فعّله برقم هاتفك', expired: 'انتهى الترخيص، تواصل مع المزوّد', limit: 'بلغت الحد الأقصى لعدد الأجهزة المسموح بها',
   throttled: 'محاولات خاطئة كثيرة، انتظر 10 دقائق', notmain: 'هذه العملية للجهاز الرئيسي فقط', network: 'لا يوجد اتصال بالإنترنت', taken: 'هذا الجهاز مسجَّل من قبل',
   notfound: 'غير موجود', revoked: 'هذا الجهاز مفصول عن المحل', badtoken: 'مفتاح الجهاز غير صالح' };
 export const syncErrText = (e) => SYNC_ERR[e?.kind] || (e?.message === 'SERVER_EMPTY' ? 'لا توجد بيانات محل في السحابة بعد' : e?.message === 'ALREADY_LINKED' ? 'هذا الجهاز مرتبط من قبل' : errText(e));

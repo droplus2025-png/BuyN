@@ -116,6 +116,12 @@ app.onLicense = (kind) => {
   app.session = null; app.engine = null;
   renderLocked(app, { mode: 'license', kind });
 };
+// the way out of a license lock: this device forgets its link (its local data is kept) and takes a new identity, then asks for the activation again
+app.resetActivation = async () => {
+  await app.sync.unlink();
+  for (const k of ['buyn_device_id', 'buyn_sync_auth', LICENSE_KEY]) localStorage.removeItem(k);
+  location.reload();
+};
 const checkLease = () => { if (app.sync.role && !localStorage.getItem(LICENSE_KEY) && app.sync.leaseExpired()) app.onLicense('lease'); };
 
 async function boot() {

@@ -52,13 +52,13 @@ begin
   return ph;
 end $$;
 
--- null when the shop's license is valid, otherwise the reason. A shop without a license is refused.
+-- null when the shop's license is valid, otherwise the reason. A shop without any license (created before licenses existed) is refused: LICENSE_MISSING.
 create or replace function _license_error(p_shop uuid) returns text
 language sql stable security definer set search_path = public as $$
   select case when l.status <> 'active' then 'LICENSE_SUSPENDED' when l.expires_at is not null and l.expires_at < now() then 'LICENSE_EXPIRED' end
     from licenses l where l.shop_id = p_shop
   union all
-  select 'LICENSE_SUSPENDED' where not exists (select 1 from licenses where shop_id = p_shop)
+  select 'LICENSE_MISSING' where not exists (select 1 from licenses where shop_id = p_shop)
   limit 1
 $$;
 

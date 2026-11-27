@@ -5,11 +5,11 @@
 // Runs by itself: when the connection comes back, when the app becomes visible, every 30 s, 2 s after a local change.
 export class SyncError extends Error {
   constructor(kind, message, extra = {}) { super(message); this.kind = kind; Object.assign(this, extra); }
-  // kinds: network | server | revoked(mode) | badtoken | notmain | badpair | badactivation | suspended | expired | limit | throttled | taken | notfound
+  // kinds: network | server | revoked(mode) | badtoken | notmain | badpair | badactivation | suspended | nolicense | expired | limit | throttled | taken | notfound
 }
 // text sent back by the SQL functions -> kind
 const KNOWN = [['DEVICE_REVOKED_WIPE', 'revoked', { mode: 'wipe' }], ['DEVICE_REVOKED_LOCK', 'revoked', { mode: 'lock' }], ['BAD_TOKEN', 'badtoken'],
-  ['NOT_MAIN', 'notmain'], ['BAD_PAIR_CODE', 'badpair'], ['BAD_ACTIVATION', 'badactivation'], ['LICENSE_SUSPENDED', 'suspended'], ['LICENSE_EXPIRED', 'expired'], ['DEVICE_LIMIT', 'limit'],
+  ['NOT_MAIN', 'notmain'], ['BAD_PAIR_CODE', 'badpair'], ['BAD_ACTIVATION', 'badactivation'], ['LICENSE_SUSPENDED', 'suspended'], ['LICENSE_MISSING', 'nolicense'], ['LICENSE_EXPIRED', 'expired'], ['DEVICE_LIMIT', 'limit'],
   ['TOO_MANY_ATTEMPTS', 'throttled'], ['DEVICE_TAKEN', 'taken'], ['NOT_FOUND', 'notfound']];
 const toError = (txt) => { const k = KNOWN.find(([c]) => String(txt).includes(c)); return k ? new SyncError(k[1], k[0], k[2]) : null; };
 
@@ -121,7 +121,7 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
       } catch (e) {
         await refreshPending().catch(() => {});
         if (e.kind === 'revoked') { set({ state: 'revoked', error: e.mode }); onRevoked?.(e.mode); }     // the owner disconnected this device
-        else if (e.kind === 'suspended' || e.kind === 'expired') { set({ state: 'license', error: e.kind }); onLicense?.(e.kind); }     // the license is suspended / ended: locked, nothing deleted
+        else if (e.kind === 'suspended' || e.kind === 'expired' || e.kind === 'nolicense') { set({ state: 'license', error: e.kind }); onLicense?.(e.kind); }     // the license is suspended / ended: locked, nothing deleted
         else if (e.kind === 'badtoken') set({ state: 'badcode', error: 'مفتاح الجهاز غير صالح' });
         else if (e.kind === 'network') set({ state: 'offline', error: null });
         else set({ state: 'error', error: e.message });

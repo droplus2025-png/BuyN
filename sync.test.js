@@ -14,7 +14,7 @@ function fakeServer() {
   lics.set(norm(PHONE), { code: CODE, status: 'active', max: 3, shop: null });
   const lease = () => new Date(clock + 14 * 864e5).toISOString();                 // the server shares the test clock
   const licenseOf = (shop) => [...lics.values()].find((l) => l.shop === shop);
-  const licenseError = (shop) => { const l = licenseOf(shop); return !l || l.status !== 'active' ? 'suspended' : null; };
+  const licenseError = (shop) => { const l = licenseOf(shop); return !l ? 'nolicense' : l.status !== 'active' ? 'suspended' : null; };
   const auth = (id, token, allowRevoked = false) => {
     const d = devs.get(id);
     if (!d || d.token !== token) throw refuse('badtoken');
@@ -105,8 +105,8 @@ function device(id) {
   return { id, disk, store, now, auth: createAuth({ store, now }) };
 }
 function attach(d, server) {
-  d.revoked = []; d.license = [];
-  d.sync = createSync({ store: d.store, meta: d.disk.meta, transport: server.transport, deviceId: d.id, now: d.now, auth: memAuth(), onRevoked: (m) => d.revoked.push(m), onLicense: (k) => d.license.push(k) });
+  d.revoked = []; d.license = []; d.syncAuth = memAuth();
+  d.sync = createSync({ store: d.store, meta: d.disk.meta, transport: server.transport, deviceId: d.id, now: d.now, auth: d.syncAuth, onRevoked: (m) => d.revoked.push(m), onLicense: (k) => d.license.push(k) });
   return d.sync;
 }
 async function owner(d) {
@@ -225,6 +225,22 @@ test('license: the device limit is enforced; a suspended license locks every dev
   assert.equal(A.sync.status.state, 'idle');
   await attach(device('D'), srv).activate(PHONE, CODE, 'd');                            // a new main device replaces the old one: the count stays within the limit
   await A.sync.syncNow(); assert.deepEqual(A.revoked, ['wipe']);
+});
+
+test('a device left in a shop with no license is locked as "no license", and a new identity can activate and bring its data along', async () => {
+  const srv = fakeServer();
+  const A = device('A'); const a = await owner(A);
+  await a.products.create({ name: 'Vis', purchasePrice: '1', salePrice: '2', qty: '10' });
+  attach(A, srv);
+  srv.devs.set('A', { id: 'A', shop: 'old-shop', name: 'old', role: 'main', status: 'active', token: 'tk' });         // made before licenses existed
+  A.syncAuth.set({ token: 'tk', role: 'main', shop_id: 'old-shop' });
+  await A.sync.syncNow();
+  assert.equal(A.sync.status.state, 'license'); assert.deepEqual(A.license, ['nolicense']);
+  await A.sync.unlink();                                                              // what the program does (and a new device id)
+  const fresh = createSync({ store: A.store, meta: A.disk.meta, transport: srv.transport, deviceId: 'A-new', now: A.now, auth: memAuth() });
+  assert.equal((await fresh.activate(PHONE, CODE, 'phone')).recovered, false);
+  assert.equal(fresh.status.state, 'idle');
+  assert.ok([...srv.rows.values()].some((r) => r.t === 'products' && r.shop === 'shop1'));                          // the local data reached the new shop
 });
 
 test('lease: given at activation, renewed at every contact, expires offline, the device clock cannot go back', async () => {
