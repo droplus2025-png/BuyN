@@ -665,3 +665,34 @@ test('purchase: supplier is optional when fully paid, required for a debt', asyn
   assert.equal(d.invoice.credit_amount, 100);
   assert.deepEqual(await w.owner.reports.integrityCheck(), []);
 });
+
+test('store: a failed operation puts back inserts, updates and a reset exactly (no copy of the database is kept)', async () => {
+  const w = await world();
+  await w.owner.products.create({ name: 'Marteau', purchasePrice: '30', salePrice: '40', qty: '5' });
+  const before = w.store.export();
+  await assert.rejects(w.store.transaction(async (tx) => {
+    const p = (await tx.all('products'))[0];
+    await tx.update('products', p.id, { name: 'Changed', extra_field: 1 });
+    await tx.insert('customers', { id: 'c-new', name: 'X', phone: '1', phone_norm: '212600000009', created_at: 'a', updated_at: 'a' });
+    await tx.deleteAll('stock_movements');
+    await tx.insert('stock_movements', { id: 'm-new', product_id: p.id, reason: 'adjustment', qty_delta: 1, qty_after: 1, created_at: 'a' });
+    throw new Error('boom');
+  }, { allowReset: true }), /boom/);
+  assert.deepEqual(w.store.export(), before);
+  assert.equal((await w.owner.products.search('', 5))[0].name, 'Marteau');          // the key index is consistent after the rollback
+  assert.equal(w.store.peek('customers', 'c-new'), undefined);
+});
+
+test('store: applyRemote ignores rows it already holds and stays fast on a large shop', async () => {
+  const store = createMemoryStore();
+  await store.transaction(async (tx) => {
+    for (let i = 1; i <= 20000; i++) await tx.insert('stock_movements', { id: `m${i}`, product_id: 'p', reason: 'sale', qty_delta: 0, created_at: 'a' });
+  });
+  const known = store.export().stock_movements.slice(-500).map((r) => ({ t: 'stock_movements', k: r.id, d: r, u: 'a' }));
+  const t0 = Date.now();
+  for (let i = 0; i < 20; i++) assert.deepEqual(await store.applyRemote(known, new Map(), { deviceId: 'me' }), { applied: 0, local: 0, settled: [] });
+  assert.ok(Date.now() - t0 < 1500, `20 re-reads of 500 known rows took ${Date.now() - t0} ms`);
+  const fresh = Array.from({ length: 500 }, (_, i) => ({ t: 'stock_movements', k: `n${i}`, d: { id: `n${i}`, product_id: 'p', reason: 'sale', qty_delta: 0, created_at: 'b' }, u: 'b' }));
+  assert.equal((await store.applyRemote(fresh, new Map(), { deviceId: 'me' })).applied, 500);
+  assert.equal(store.peek('stock_movements', 'n499').id, 'n499');
+});

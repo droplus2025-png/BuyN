@@ -9,26 +9,31 @@ import { uniqueInvoiceNo } from './invoice-number.js';
 const ms = (x) => (x ? Date.parse(x) || 0 : 0);
 const laterFirst = (a, b) => (a.created_at || '').localeCompare(b.created_at || '') || String(a.id).localeCompare(String(b.id));   // > 0 when a is later
 
+const addTo = (map, key, val) => { const l = map.get(key); if (l) l.push(val); else map.set(key, [val]); };
+const removeFrom = (map, key, val) => { const l = map.get(key); if (l) { const i = l.indexOf(val); if (i >= 0) l.splice(i, 1); } };
+
 export function mergeRemote(state, rows, { dirty, deviceId, nowIso, pk, appendOnly }) {
   const applied = new Map();        // key -> [table, row]   written as "remote" (nothing to send back)
   const local = new Map();          // key -> [table, row]   our own corrections (they ARE sent)
   const settled = [];               // outbox keys the remote version replaced
   const touched = new Set();        // products whose qty must be recomputed
+  const pos = {};                   // table -> Map(id -> position): a row is found in O(1), not by scanning the table
+  const posOf = (t) => (pos[t] ||= new Map(state[t].map((x, i) => [x[pk(t)], i])));
 
   for (const { t, d: row, u } of rows) {
     if (!state[t] || !row) continue;
     const id = row[pk(t)];
     if (id == null) continue;
     const k = `${t}|${id}`;
-    const i = state[t].findIndex((x) => x[pk(t)] === id);
+    const i = posOf(t).get(id) ?? -1;
     if (appendOnly.has(t)) {
-      if (i < 0) { state[t].push(row); applied.set(k, [t, row]); if (t === 'stock_movements') touched.add(row.product_id); }
+      if (i < 0) { state[t].push(row); posOf(t).set(id, state[t].length - 1); applied.set(k, [t, row]); if (t === 'stock_movements') touched.add(row.product_id); }
       continue;
     }
     if (i >= 0 && JSON.stringify(state[t][i]) === JSON.stringify(row)) continue;       // nothing new
     const du = dirty.get(k);
     if (du && ms(du) > ms(u)) continue;                                                   // ours is newer and not sent yet
-    if (i >= 0) state[t][i] = row; else state[t].push(row);
+    if (i >= 0) state[t][i] = row; else { state[t].push(row); posOf(t).set(id, state[t].length - 1); }
     applied.set(k, [t, row]);
     if (du) settled.push(k);
     if (t === 'products') touched.add(row.id);
@@ -44,16 +49,18 @@ export function mergeRemote(state, rows, { dirty, deviceId, nowIso, pk, appendOn
   }
 
   // same SKU on two products
+  let bySku = null;
+  const skus = () => bySku || (bySku = state.products.reduce((m, p) => (addTo(m, p.sku, p), m), new Map()));
   for (const [t, row] of [...applied.values()]) {
     if (t !== 'products') continue;
-    const other = state.products.find((p) => p.id !== row.id && p.sku === row.sku);
+    const other = (skus().get(row.sku) || []).find((p) => p.id !== row.id);
     if (!other) continue;
     const loser = laterFirst(row, other) >= 0 ? row : other;
     if (loser.origin_device !== deviceId) continue;
     const used = new Set([...state.products.map((p) => p.sku), ...state.sku_registry.map((r) => r.sku)]);
     const c = String(loser.sku)[0]; let k = 1; while (used.has(`${c}${k}`)) k++;
     const n = `${c}${k}`; loser.num = k;
-    loser.sku = n; loser.updated_at = nowIso;
+    removeFrom(skus(), loser.sku, loser); loser.sku = n; addTo(skus(), n, loser); loser.updated_at = nowIso;
     const reg = { sku: n, product_id: loser.id };
     state.sku_registry.push(reg);
     applied.delete(`products|${loser.id}`);
@@ -62,14 +69,16 @@ export function mergeRemote(state, rows, { dirty, deviceId, nowIso, pk, appendOn
   }
 
   // same invoice number on two invoices
+  let byNo = null;
+  const nos = () => byNo || (byNo = state.invoices.reduce((m, x) => (addTo(m, x.invoice_no, x), m), new Map()));
   for (const [t, row] of [...applied.values()]) {
     if (t !== 'invoices') continue;
-    const other = state.invoices.find((x) => x.id !== row.id && x.invoice_no === row.invoice_no);
+    const other = (nos().get(row.invoice_no) || []).find((x) => x.id !== row.id);
     if (!other) continue;
     const loser = laterFirst(row, other) >= 0 ? row : other;
     if (loser.device_id !== deviceId) continue;
-    loser.invoice_no = uniqueInvoiceNo(state.invoices.map((x) => x.invoice_no), String(loser.invoice_no).split('-')[0]);
-    loser.updated_at = nowIso;
+    const next = uniqueInvoiceNo(state.invoices.map((x) => x.invoice_no), String(loser.invoice_no).split('-')[0]);
+    removeFrom(nos(), loser.invoice_no, loser); loser.invoice_no = next; addTo(nos(), next, loser); loser.updated_at = nowIso;
     applied.delete(`invoices|${loser.id}`);
     local.set(`invoices|${loser.id}`, ['invoices', loser]);
   }

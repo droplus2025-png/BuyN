@@ -2,7 +2,7 @@
 //   ONE main device + linked devices. Each device has its OWN key (given when it joins with a one-time link code).
 //   The main device makes link codes, sees the devices and disconnects any of them (lock or wipe).
 //   push : rows waiting in the outbox -> server        pull : what other devices did -> merged here
-// Runs by itself: when the connection comes back, when the app becomes visible, every 30 s, 2 s after a local change.
+// Runs by itself: when the connection comes back, when the app becomes visible, every 15 s while it is on screen, 1 s after a local change.
 export class SyncError extends Error {
   constructor(kind, message, extra = {}) { super(message); this.kind = kind; Object.assign(this, extra); }
   // kinds: network | server | revoked(mode) | badtoken | notmain | badpair | badactivation | suspended | nolicense | expired | limit | throttled | taken | notfound
@@ -36,8 +36,8 @@ export function supabaseTransport({ url, key, fetchFn = (...a) => fetch(...a) })
     devices: (device, token) => call('list_devices', { p_device: device, p_token: token }),
     revoke: (device, token, target, mode) => call('revoke_device', { p_device: device, p_token: token, p_target: target, p_mode: mode }),
     ackRevoked: (device, token) => call('ack_revoked', { p_device: device, p_token: token }),
-    push: (device, token, rows) => call('sync_push', { p_device: device, p_token: token, p_rows: rows }),
-    pull: (device, token, since, limit) => call('sync_pull', { p_device: device, p_token: token, p_since: since, p_limit: limit }),
+    // ONE request: what this device has to send, and what the other devices did since `since` (comes back in the same answer)
+    exchange: (device, token, rows, since, limit) => call('sync_exchange', { p_device: device, p_token: token, p_rows: rows, p_since: since, p_limit: limit }),
   };
 }
 
@@ -49,10 +49,10 @@ export const deviceAuth = {
   clear: () => localStorage.removeItem(AUTH_KEY),
 };
 
-const PULL_PAGE = 500;
+const PAGE = 500;             // rows per request, both ways (the server accepts 500 at most)
 const OVERLAP = 100;          // re-read the last rows each time: a row committed late on the server is never missed (merging twice is harmless)
 
-export function createSync({ store, meta, transport, deviceId, auth = deviceAuth, onRevoked, onLicense, now = () => new Date(), intervalMs = 30000 }) {
+export function createSync({ store, meta, transport, deviceId, auth = deviceAuth, onRevoked, onLicense, now = () => new Date(), intervalMs = 15000 }) {
   let st = { state: 'off', pending: 0, last: null, error: null };
   const listeners = [];
   let running = null, again = false, timer = null, debounce = null, started = false;
@@ -69,42 +69,34 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
   };
   const need = () => { const a = auth.get(); if (!a) throw new SyncError('badtoken', 'NOT_LINKED'); return a; };
 
-  async function pushAll(token) {
-    for (let i = 0; i < 100; i++) {
-      const ob = await meta.outbox(200);
-      if (!ob.length) return;
+  // one round = ONE request: send a batch of waiting rows and receive what the other devices did. Repeats while more is waiting.
+  // Returns the number of our own corrections (renamed duplicates) that still have to go out.
+  async function exchangeAll(token) {
+    let corrections = 0;
+    for (let i = 0; i < 400; i++) {
+      const ob = await meta.outbox(PAGE);
       const rows = [];
       for (const e of ob) {
         const row = store.peek(e.table, e.pk);
         if (row) rows.push({ t: e.table, k: String(e.pk), d: row, u: e.u });
       }
-      if (rows.length) touchLease(await transport.push(deviceId, token, rows));
-      await meta.ack(ob);
-    }
-  }
-  async function pullAll(token) {
-    let local = 0;
-    for (let i = 0; i < 400; i++) {
       const cursor = await meta.get('cursor', 0);
-      const res = await transport.pull(deviceId, token, Math.max(0, cursor - OVERLAP), PULL_PAGE);
+      const res = await transport.exchange(deviceId, token, rows, Math.max(0, cursor - OVERLAP), PAGE);
       touchLease(res);
-      const rows = res.rows || [];
-      if (rows.length) {
-        const r = await store.applyRemote(rows, await meta.outboxMap(), { deviceId, now });
+      if (ob.length) await meta.ack(ob);                       // sent: forget them (unless changed again meanwhile)
+      const got = res.rows || [];
+      if (got.length) {
+        const r = await store.applyRemote(got, await meta.outboxMap(), { deviceId, now });
         if (r.settled.length) await meta.drop(r.settled);
-        local += r.local;
+        corrections += r.local;
       }
       if (res.last > cursor) await meta.set('cursor', res.last);
-      if (rows.length < PULL_PAGE) break;
+      if (ob.length < PAGE && got.length < PAGE) break;        // nothing more on either side
     }
-    return local;
+    return corrections;
   }
   async function cycle(token) {
-    for (let round = 0; round < 5; round++) {
-      await pushAll(token);
-      const fixes = await pullAll(token);
-      if (!fixes) break;                       // our own corrections (renamed duplicates) must go out too
-    }
+    for (let round = 0; round < 5; round++) if (!(await exchangeAll(token))) break;      // our own corrections must go out too
   }
 
   function syncNow() {
@@ -134,13 +126,13 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
     return running;
   }
 
-  function onLocalChange() {                   // 2 s after the last local change, if something waits to be sent
+  function onLocalChange() {                   // 1 s after the last local change, if something waits to be sent
     clearTimeout(debounce);
     debounce = setTimeout(async () => {
       const n = await meta.outboxCount().catch(() => 0);
       if (st.pending !== n) set({ pending: n });
       if (n && auth.get()) syncNow();
-    }, 2000);
+    }, 1000);
   }
 
   // everything this device holds goes to the outbox (the server keeps the newest version of each row)
@@ -177,7 +169,7 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
         window.addEventListener('offline', () => set({ state: auth.get() ? 'offline' : 'off' }));
         document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncNow(); });
       }
-      timer = setInterval(syncNow, intervalMs);
+      timer = setInterval(() => { if (typeof document === 'undefined' || document.visibilityState !== 'hidden') syncNow(); }, intervalMs);     // nothing is polled while the program is in the background
       refreshPending().then(syncNow);
     },
     stop() { clearInterval(timer); clearTimeout(debounce); started = false; },

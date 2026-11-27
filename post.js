@@ -40,7 +40,7 @@ export async function postInvoice(ctx, tx, d) {
   ctx.access.requirePost(d.type);
   if (d.paid + d.credit_amount !== d.total) fail('UNBALANCED', 'paid + credit must equal total', { paid: d.paid, credit: d.credit_amount, total: d.total });
   const t = ctx.now();
-  const nos = (await tx.all('invoices')).map(i => i.invoice_no);
+  const nos = await tx.column('invoices', 'invoice_no');
   const tz = await getSetting(tx, 'timezone', 'Africa/Casablanca');
   const invoice = {
     id: ctx.ids(), invoice_no: uniqueInvoiceNo(nos, d.invoice_no || nextInvoiceNo(nos, t, tz)), type: d.type,

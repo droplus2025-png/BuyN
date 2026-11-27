@@ -10,7 +10,7 @@ const refuse = (kind, extra = {}) => Object.assign(new Error(kind), { kind, ...e
 const PHONE = '0663152474', CODE = 'ACT-CODE-1';
 const norm = (p) => { const d = String(p).replace(/\D/g, ''); return d.startsWith('00') ? d.slice(2) : d.startsWith('0') && d.length === 10 ? `212${d.slice(1)}` : d; };
 function fakeServer() {
-  const rows = new Map(), devs = new Map(), codes = new Map(), lics = new Map(); let seq = 0, tok = 0, shops = 0, wrong = 0;
+  const calls = { n: 0 }; const rows = new Map(), devs = new Map(), codes = new Map(), lics = new Map(); let seq = 0, tok = 0, shops = 0, wrong = 0;
   lics.set(norm(PHONE), { code: CODE, status: 'active', max: 3, shop: null });
   const lease = () => new Date(clock + 14 * 864e5).toISOString();                 // the server shares the test clock
   const licenseOf = (shop) => [...lics.values()].find((l) => l.shop === shop);
@@ -27,7 +27,7 @@ function fakeServer() {
   };
   const main = (id, token) => { const d = auth(id, token); if (d.role !== 'main') throw refuse('notmain'); return d; };
   return {
-    rows, devs, lics,
+    rows, devs, lics, calls,
     transport: {
       async activate(phone, code, id, name) {
         if (wrong >= 5) throw refuse('throttled');
@@ -63,17 +63,14 @@ function fakeServer() {
         return { ok: true };
       },
       async ackRevoked(id, token) { const d = auth(id, token, true); d.wiped = true; return { ok: true }; },
-      async push(id, token, list) {
+      async exchange(id, token, list, since, limit) {
         const d = auth(id, token);
+        calls.n++;
         for (const r of list) {
           const k = `${d.shop}|${r.t}|${r.k}`, cur = rows.get(k);
           if (!cur) rows.set(k, { ...r, shop: d.shop, dev: id, seq: ++seq });
           else if (!APPEND.has(r.t) && Date.parse(cur.u) <= Date.parse(r.u)) rows.set(k, { ...r, shop: d.shop, dev: id, seq: ++seq });
         }
-        return { ok: true, lease_until: d.lease };
-      },
-      async pull(id, token, since, limit) {
-        const d = auth(id, token);
         const out = [...rows.values()].filter((r) => r.shop === d.shop && r.seq > since && r.dev !== id).sort((a, b) => a.seq - b.seq).slice(0, limit);
         return { rows: out.map((r) => ({ t: r.t, k: r.k, d: r.d, u: r.u, s: r.seq })), last: out.length ? out[out.length - 1].seq : since, lease_until: d.lease };
       },
@@ -307,16 +304,44 @@ test('transport: a publishable key goes in apikey only, refusals map to kinds', 
   const calls = [];
   const mk = (res) => supabaseTransport({ url: 'https://x.supabase.co', key: 'sb_publishable_abc', fetchFn: async (u, o) => { calls.push({ u, o }); return res; } });
   const ok = { ok: true, json: async () => ({ ok: true }) };
-  await mk(ok).push('A', 'tok', []);
-  assert.equal(calls[0].u, 'https://x.supabase.co/rest/v1/rpc/sync_push');
+  await mk(ok).exchange('A', 'tok', [], 0, 500);
+  assert.equal(calls[0].u, 'https://x.supabase.co/rest/v1/rpc/sync_exchange');
   assert.equal(calls[0].o.headers.apikey, 'sb_publishable_abc'); assert.equal(calls[0].o.headers.Authorization, undefined);
-  assert.deepEqual(JSON.parse(calls[0].o.body), { p_device: 'A', p_token: 'tok', p_rows: [] });
-  await assert.rejects(mk({ ok: false, status: 400, text: async () => '{"message":"DEVICE_REVOKED_WIPE"}' }).pull('A', 't', 0, 1), (e) => e.kind === 'revoked' && e.mode === 'wipe');
+  assert.deepEqual(JSON.parse(calls[0].o.body), { p_device: 'A', p_token: 'tok', p_rows: [], p_since: 0, p_limit: 500 });
+  await assert.rejects(mk({ ok: false, status: 400, text: async () => '{"message":"DEVICE_REVOKED_WIPE"}' }).exchange('A', 't', [], 0, 1), (e) => e.kind === 'revoked' && e.mode === 'wipe');
   await assert.rejects(mk({ ok: true, json: async () => ({ error: 'BAD_PAIR_CODE' }) }).join('1', 'A', 'x'), (e) => e.kind === 'badpair');
   await assert.rejects(mk({ ok: false, status: 400, text: async () => '{"message":"TOO_MANY_ATTEMPTS"}' }).join('1', 'A', 'x'), (e) => e.kind === 'throttled');
   await assert.rejects(mk({ ok: true, json: async () => ({ error: 'LICENSE_SUSPENDED' }) }).activate('0', 'c', 'A', 'x'), (e) => e.kind === 'suspended');
   await assert.rejects(mk({ ok: false, status: 400, text: async () => '{"message":"DEVICE_LIMIT"}' }).join('1', 'A', 'x'), (e) => e.kind === 'limit');
   const legacy = supabaseTransport({ url: 'u', key: 'eyJabc', fetchFn: async (u, o) => { calls.push({ u, o }); return ok; } });
-  await legacy.push('A', 't', []);
+  await legacy.exchange('A', 't', [], 0, 1);
   assert.equal(calls.at(-1).o.headers.Authorization, 'Bearer eyJabc');
+});
+
+test('sync: one request per round (rows out and rows in together), and nothing to do costs one small request', async () => {
+  const srv = fakeServer();
+  const A = device('A'), B = device('B');
+  const a = await owner(A); await link(srv, A, B);
+  const p = await a.products.create({ name: 'Vis', purchasePrice: '1', salePrice: '2', qty: '10' });
+  await A.sync.syncNow(); await B.sync.syncNow();
+  const before = srv.calls.n;
+  await B.sync.syncNow();                                                           // nothing new anywhere
+  assert.equal(srv.calls.n - before, 1);
+  await a.sale({ lines: [{ productId: p.id, qty: 1, price: '2' }], paid: '2' });
+  const b2 = srv.calls.n;
+  await A.sync.syncNow();                                                           // sends the sale and looks for news in the same request
+  assert.equal(srv.calls.n - b2, 1);
+  await B.sync.syncNow();
+  assert.equal(B.store.export().invoices.length, 1);
+});
+
+test('sync: a large backlog goes out in pages of 500 and converges', async () => {
+  const srv = fakeServer();
+  const A = device('A'), B = device('B');
+  const a = await owner(A); await link(srv, A, B);
+  for (let i = 0; i < 40; i++) await a.products.create({ name: `Produit ${i}`, purchasePrice: '1', salePrice: '2', qty: '5' });      // ~ 40 products + 40 movements + audit rows: a few hundred rows
+  await A.sync.syncNow(); await B.sync.syncNow();
+  assert.equal(B.store.export().products.length, 40);
+  assert.equal(B.store.export().stock_movements.length, 40);
+  assert.equal(await A.disk.meta.outboxCount(), 0);
 });
