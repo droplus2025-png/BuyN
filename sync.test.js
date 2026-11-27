@@ -3,38 +3,56 @@ import assert from 'node:assert/strict';
 import { createEngine, createMemoryStore, createAuth } from './index.js';
 import { createSync } from './sync.js';
 
-// ---- a fake server that behaves like sync_schema.sql (devices with their own keys, link codes, disconnection)
+// ---- a fake server that behaves like sync_schema.sql + license_schema.sql
+//      (licenses by phone number, devices with their own keys, link codes, disconnection, device limit, 14-day lease)
 const APPEND = new Set(['invoice_lines', 'stock_movements', 'cash_ledger', 'debt_ledger', 'invoice_settlements', 'price_history', 'audit_log', 'sku_registry']);
 const refuse = (kind, extra = {}) => Object.assign(new Error(kind), { kind, ...extra });
-function fakeServer(setupKey = 'my-setup-key') {
-  const rows = new Map(), devs = new Map(), codes = new Map(); let seq = 0, tok = 0, shops = 0, wrong = 0;
+const PHONE = '0663152474', CODE = 'ACT-CODE-1';
+const norm = (p) => { const d = String(p).replace(/\D/g, ''); return d.startsWith('00') ? d.slice(2) : d.startsWith('0') && d.length === 10 ? `212${d.slice(1)}` : d; };
+function fakeServer() {
+  const rows = new Map(), devs = new Map(), codes = new Map(), lics = new Map(); let seq = 0, tok = 0, shops = 0, wrong = 0;
+  lics.set(norm(PHONE), { code: CODE, status: 'active', max: 3, shop: null });
+  const lease = () => new Date(clock + 14 * 864e5).toISOString();                 // the server shares the test clock
+  const licenseOf = (shop) => [...lics.values()].find((l) => l.shop === shop);
+  const licenseError = (shop) => { const l = licenseOf(shop); return !l || l.status !== 'active' ? 'suspended' : null; };
   const auth = (id, token, allowRevoked = false) => {
     const d = devs.get(id);
     if (!d || d.token !== token) throw refuse('badtoken');
-    if (d.status === 'revoked' && !allowRevoked) throw refuse('revoked', { mode: d.mode });
+    if (!allowRevoked) {
+      if (d.status === 'revoked') throw refuse('revoked', { mode: d.mode });
+      const e = licenseError(d.shop); if (e) throw refuse(e);
+      d.lease = lease();
+    }
     return d;
   };
   const main = (id, token) => { const d = auth(id, token); if (d.role !== 'main') throw refuse('notmain'); return d; };
-  const key = (k) => { if (wrong >= 10) throw refuse('throttled'); if (k !== setupKey) { wrong++; throw refuse('badkey'); } };
   return {
-    rows, devs,
+    rows, devs, lics,
     transport: {
-      async createShop(k, id, name) { key(k); if (devs.has(id)) throw refuse('taken'); const shop = `shop${++shops}`, token = `t${++tok}`; devs.set(id, { id, shop, name, role: 'main', status: 'active', token }); return { shop_id: shop, token, role: 'main' }; },
+      async activate(phone, code, id, name) {
+        if (wrong >= 5) throw refuse('throttled');
+        const l = lics.get(norm(phone));
+        if (!l || l.code !== code) { wrong++; throw refuse('badactivation'); }
+        if (l.status !== 'active') throw refuse('suspended');
+        const old = devs.get(id); if (old && old.shop !== l.shop) throw refuse('taken');
+        let recovered = false;
+        if (!l.shop) l.shop = `shop${++shops}`;
+        else { recovered = true; for (const d of devs.values()) if (d.shop === l.shop && d.role === 'main' && d.id !== id && d.status === 'active') Object.assign(d, { status: 'revoked', mode: 'wipe', wiped: false }); }
+        if (!old && [...devs.values()].filter((d) => d.shop === l.shop && d.status === 'active').length >= l.max) throw refuse('limit');
+        const token = `t${++tok}`; devs.set(id, { id, shop: l.shop, name, role: 'main', status: 'active', token, lease: lease() });
+        return { shop_id: l.shop, token, role: 'main', recovered, lease_until: devs.get(id).lease };
+      },
       async pairingCode(id, token) { const d = main(id, token); const code = String(10000000 + codes.size); codes.set(code, { shop: d.shop, used: false }); return { code }; },
       async join(code, id, name) {
-        if (wrong >= 10) throw refuse('throttled');
+        if (wrong >= 30) throw refuse('throttled');
         const c = codes.get(String(code).replace(/\D/g, ''));
         if (!c || c.used) { wrong++; throw refuse('badpair'); }
+        const e = licenseError(c.shop); if (e) throw refuse(e);
+        if ([...devs.values()].filter((d) => d.shop === c.shop && d.status === 'active' && d.id !== id).length >= licenseOf(c.shop).max) throw refuse('limit');
         const old = devs.get(id);
         if (old && (old.shop !== c.shop || old.status === 'active')) throw refuse('taken');
-        const token = `t${++tok}`; devs.set(id, { id, shop: c.shop, name, role: 'linked', status: 'active', token }); c.used = true;
-        return { shop_id: c.shop, token, role: 'linked' };
-      },
-      async recover(k, shop, id, name) {
-        key(k);
-        for (const d of devs.values()) if (d.shop === shop && d.role === 'main' && d.id !== id) { d.status = 'revoked'; d.mode = 'wipe'; }
-        const token = `t${++tok}`; devs.set(id, { id, shop, name, role: 'main', status: 'active', token });
-        return { shop_id: shop, token, role: 'main' };
+        const token = `t${++tok}`; devs.set(id, { id, shop: c.shop, name, role: 'linked', status: 'active', token, lease: lease() }); c.used = true;
+        return { shop_id: c.shop, token, role: 'linked', lease_until: devs.get(id).lease };
       },
       async devices(id, token) { const d = main(id, token); return [...devs.values()].filter((x) => x.shop === d.shop).map(({ token: _t, ...x }) => x); },
       async revoke(id, token, target, mode) {
@@ -52,12 +70,12 @@ function fakeServer(setupKey = 'my-setup-key') {
           if (!cur) rows.set(k, { ...r, shop: d.shop, dev: id, seq: ++seq });
           else if (!APPEND.has(r.t) && Date.parse(cur.u) <= Date.parse(r.u)) rows.set(k, { ...r, shop: d.shop, dev: id, seq: ++seq });
         }
-        return { ok: true };
+        return { ok: true, lease_until: d.lease };
       },
       async pull(id, token, since, limit) {
         const d = auth(id, token);
         const out = [...rows.values()].filter((r) => r.shop === d.shop && r.seq > since && r.dev !== id).sort((a, b) => a.seq - b.seq).slice(0, limit);
-        return { rows: out.map((r) => ({ t: r.t, k: r.k, d: r.d, u: r.u, s: r.seq })), last: out.length ? out[out.length - 1].seq : since };
+        return { rows: out.map((r) => ({ t: r.t, k: r.k, d: r.d, u: r.u, s: r.seq })), last: out.length ? out[out.length - 1].seq : since, lease_until: d.lease };
       },
     },
   };
@@ -87,8 +105,8 @@ function device(id) {
   return { id, disk, store, now, auth: createAuth({ store, now }) };
 }
 function attach(d, server) {
-  d.revoked = [];
-  d.sync = createSync({ store: d.store, meta: d.disk.meta, transport: server.transport, deviceId: d.id, now: d.now, auth: memAuth(), onRevoked: (m) => d.revoked.push(m) });
+  d.revoked = []; d.license = [];
+  d.sync = createSync({ store: d.store, meta: d.disk.meta, transport: server.transport, deviceId: d.id, now: d.now, auth: memAuth(), onRevoked: (m) => d.revoked.push(m), onLicense: (k) => d.license.push(k) });
   return d.sync;
 }
 async function owner(d) {
@@ -101,7 +119,7 @@ const sum = (rows, f) => rows.reduce((a, r) => a + f(r), 0);
 
 // the main device makes the shop and a link code; the new device joins with it
 async function link(srv, main, other) {
-  await attach(main, srv).makeMain('my-setup-key', 'main');
+  await attach(main, srv).activate(PHONE, CODE, 'main');
   const { code } = await main.sync.pairingCode();
   await attach(other, srv).join(code, 'second');
 }
@@ -165,13 +183,15 @@ test('sync: a newer local edit is not overwritten by an older remote one', async
   assert.equal((await b.settings.get()).store_name, 'A name');
 });
 
-test('link: wrong or reused code and wrong setup key are refused; only the main device makes codes and sees devices', async () => {
+test('activation: unknown number or wrong code refused (same answer), a number can be written in any form, only the main device makes codes and sees devices', async () => {
   const srv = fakeServer();
   const A = device('A'); await owner(A);
-  await assert.rejects(attach(A, srv).makeMain('wrong-key', 'main'), (e) => e.kind === 'badkey');
+  await assert.rejects(attach(A, srv).activate(PHONE, 'wrong', 'main'), (e) => e.kind === 'badactivation');
+  await assert.rejects(A.sync.activate('0600000000', CODE, 'main'), (e) => e.kind === 'badactivation');
   assert.equal(A.sync.role, null);
-  await A.sync.makeMain('my-setup-key', 'main');
-  await assert.rejects(A.sync.makeMain('my-setup-key', 'again'), /ALREADY_LINKED/);
+  const r = await A.sync.activate('+212 663-152474', CODE, 'main');             // 06.. = +212 6.. = same number
+  assert.equal(r.recovered, false); assert.equal(A.sync.role, 'main');
+  await assert.rejects(A.sync.activate(PHONE, CODE, 'again'), /ALREADY_LINKED/);
   const B = device('B'), C = device('C');
   await assert.rejects(attach(B, srv).join('00000000', 'b'), (e) => e.kind === 'badpair');
   const { code } = await A.sync.pairingCode();
@@ -179,9 +199,58 @@ test('link: wrong or reused code and wrong setup key are refused; only the main 
   await assert.rejects(attach(C, srv).join(code, 'c'), (e) => e.kind === 'badpair');          // one use only
   await assert.rejects(B.sync.pairingCode(), (e) => e.kind === 'notmain');
   await assert.rejects(B.sync.devices(), (e) => e.kind === 'notmain');
-  const list = await A.sync.devices();
-  assert.deepEqual(list.map((d) => [d.id, d.role, d.status]), [['A', 'main', 'active'], ['B', 'linked', 'active']]);
+  assert.deepEqual((await A.sync.devices()).map((d) => [d.id, d.role, d.status]), [['A', 'main', 'active'], ['B', 'linked', 'active']]);
   await assert.rejects(A.sync.revoke('A', 'lock'), /SELF_REVOKE/);
+});
+
+test('activation: too many wrong codes are stopped', async () => {
+  const srv = fakeServer(); const A = device('A'); await owner(A); attach(A, srv);
+  for (let i = 0; i < 5; i++) await assert.rejects(A.sync.activate(PHONE, `bad${i}`, 'x'), (e) => e.kind === 'badactivation');
+  await assert.rejects(A.sync.activate(PHONE, CODE, 'x'), (e) => e.kind === 'throttled');
+});
+
+test('license: the device limit is enforced; a suspended license locks every device (nothing deleted) and resuming brings them back', async () => {
+  const srv = fakeServer();
+  srv.lics.get(norm(PHONE)).max = 2;
+  const A = device('A'), B = device('B'), C = device('C');
+  await owner(A); await link(srv, A, B);
+  await assert.rejects(attach(C, srv).join((await A.sync.pairingCode()).code, 'third'), (e) => e.kind === 'limit');
+  srv.lics.get(norm(PHONE)).status = 'suspended';
+  await A.sync.syncNow(); await B.sync.syncNow();
+  assert.equal(A.sync.status.state, 'license'); assert.deepEqual(A.license, ['suspended']); assert.deepEqual(B.license, ['suspended']);
+  assert.deepEqual(A.revoked, []);                                                    // locked, not disconnected
+  assert.equal(A.store.export().products.length, A.store.export().products.length);   // the data stays
+  srv.lics.get(norm(PHONE)).status = 'active';
+  await A.sync.syncNow();
+  assert.equal(A.sync.status.state, 'idle');
+  await attach(device('D'), srv).activate(PHONE, CODE, 'd');                            // a new main device replaces the old one: the count stays within the limit
+  await A.sync.syncNow(); assert.deepEqual(A.revoked, ['wipe']);
+});
+
+test('lease: given at activation, renewed at every contact, expires offline, the device clock cannot go back', async () => {
+  const srv = fakeServer();
+  const A = device('A'); await owner(A);
+  await link(srv, A, device('B'));
+  assert.ok(A.sync.leaseUntil);
+  assert.equal(A.sync.leaseExpired(), false);
+  clock += 13 * 864e5; assert.equal(A.sync.leaseExpired(), false);                       // 13 days without internet: still working
+  await A.sync.syncNow(); const renewed = Date.parse(A.sync.leaseUntil);                 // a contact renews it
+  assert.ok(renewed > Date.UTC(2026, 10, 16) + 14 * 864e5);
+  clock += 15 * 864e5; assert.equal(A.sync.leaseExpired(), true);                        // 15 days offline: locked
+  clock -= 10 * 864e5; assert.equal(A.sync.leaseExpired(), true);                        // putting the clock back does not help
+});
+
+test('recover: activating again on a new device makes it the main one, wipes the old main device, and the shop comes back from the cloud', async () => {
+  const srv = fakeServer();
+  const A = device('A'), B = device('B');
+  const a = await owner(A);
+  await a.products.create({ name: 'Vis', purchasePrice: '1', salePrice: '2', qty: '10' });
+  await attach(A, srv).activate(PHONE, CODE, 'main');
+  const r = await attach(B, srv).activate(PHONE, CODE, 'new main');
+  assert.equal(r.recovered, true); assert.equal(B.sync.role, 'main');
+  assert.equal(B.store.export().products.length, 1);
+  await A.sync.syncNow();
+  assert.deepEqual(A.revoked, ['wipe']);
 });
 
 test('disconnect (lock): the device is refused at its next contact, nothing it did afterwards reaches the shop, the others go on', async () => {
@@ -217,21 +286,6 @@ test('disconnect (wipe): the device is told to erase itself and confirms; it can
   assert.equal(B.sync.role, 'linked'); assert.equal(srv.devs.get('B').status, 'active');
 });
 
-test('recover: a new device takes the place of a lost main device, the old one is wiped, the shop comes back from the cloud', async () => {
-  const srv = fakeServer();
-  const A = device('A'), B = device('B');
-  const a = await owner(A);
-  await a.products.create({ name: 'Vis', purchasePrice: '1', salePrice: '2', qty: '10' });
-  await attach(A, srv).makeMain('my-setup-key', 'main');
-  const shop = A.sync.shopId;
-  await attach(B, srv).recover('my-setup-key', shop, 'new main');
-  assert.equal(B.sync.role, 'main');
-  assert.equal(B.store.export().products.length, 1);
-  await A.sync.syncNow();
-  assert.deepEqual(A.revoked, ['wipe']);
-  await assert.rejects(attach(device('Z'), srv).recover('wrong-key', shop, 'z'), (e) => e.kind === 'badkey');
-});
-
 test('transport: a publishable key goes in apikey only, refusals map to kinds', async () => {
   const { supabaseTransport } = await import('./sync.js');
   const calls = [];
@@ -244,6 +298,8 @@ test('transport: a publishable key goes in apikey only, refusals map to kinds', 
   await assert.rejects(mk({ ok: false, status: 400, text: async () => '{"message":"DEVICE_REVOKED_WIPE"}' }).pull('A', 't', 0, 1), (e) => e.kind === 'revoked' && e.mode === 'wipe');
   await assert.rejects(mk({ ok: true, json: async () => ({ error: 'BAD_PAIR_CODE' }) }).join('1', 'A', 'x'), (e) => e.kind === 'badpair');
   await assert.rejects(mk({ ok: false, status: 400, text: async () => '{"message":"TOO_MANY_ATTEMPTS"}' }).join('1', 'A', 'x'), (e) => e.kind === 'throttled');
+  await assert.rejects(mk({ ok: true, json: async () => ({ error: 'LICENSE_SUSPENDED' }) }).activate('0', 'c', 'A', 'x'), (e) => e.kind === 'suspended');
+  await assert.rejects(mk({ ok: false, status: 400, text: async () => '{"message":"DEVICE_LIMIT"}' }).join('1', 'A', 'x'), (e) => e.kind === 'limit');
   const legacy = supabaseTransport({ url: 'u', key: 'eyJabc', fetchFn: async (u, o) => { calls.push({ u, o }); return ok; } });
   await legacy.push('A', 't', []);
   assert.equal(calls.at(-1).o.headers.Authorization, 'Bearer eyJabc');

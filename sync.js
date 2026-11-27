@@ -5,11 +5,11 @@
 // Runs by itself: when the connection comes back, when the app becomes visible, every 30 s, 2 s after a local change.
 export class SyncError extends Error {
   constructor(kind, message, extra = {}) { super(message); this.kind = kind; Object.assign(this, extra); }
-  // kinds: network | server | revoked(mode) | badtoken | notmain | badpair | badkey | keynotset | throttled | taken | notfound
+  // kinds: network | server | revoked(mode) | badtoken | notmain | badpair | badactivation | suspended | expired | limit | throttled | taken | notfound
 }
 // text sent back by the SQL functions -> kind
 const KNOWN = [['DEVICE_REVOKED_WIPE', 'revoked', { mode: 'wipe' }], ['DEVICE_REVOKED_LOCK', 'revoked', { mode: 'lock' }], ['BAD_TOKEN', 'badtoken'],
-  ['NOT_MAIN', 'notmain'], ['BAD_PAIR_CODE', 'badpair'], ['SETUP_KEY_BAD', 'badkey'], ['SETUP_KEY_NOT_SET', 'keynotset'],
+  ['NOT_MAIN', 'notmain'], ['BAD_PAIR_CODE', 'badpair'], ['BAD_ACTIVATION', 'badactivation'], ['LICENSE_SUSPENDED', 'suspended'], ['LICENSE_EXPIRED', 'expired'], ['DEVICE_LIMIT', 'limit'],
   ['TOO_MANY_ATTEMPTS', 'throttled'], ['DEVICE_TAKEN', 'taken'], ['NOT_FOUND', 'notfound']];
 const toError = (txt) => { const k = KNOWN.find(([c]) => String(txt).includes(c)); return k ? new SyncError(k[1], k[0], k[2]) : null; };
 
@@ -30,9 +30,8 @@ export function supabaseTransport({ url, key, fetchFn = (...a) => fetch(...a) })
     return res;
   }
   return {
-    createShop: (setupKey, device, name) => call('create_shop', { p_setup_key: setupKey, p_device: device, p_name: name }),
+    activate: (phone, code, device, name) => call('activate', { p_phone: phone, p_code: code, p_device: device, p_name: name }),
     join: (code, device, name) => call('join_shop', { p_code: code, p_device: device, p_name: name }),
-    recover: (setupKey, shop, device, name) => call('recover_main', { p_setup_key: setupKey, p_shop: shop, p_device: device, p_name: name }),
     pairingCode: (device, token) => call('create_pairing_code', { p_device: device, p_token: token }),
     devices: (device, token) => call('list_devices', { p_device: device, p_token: token }),
     revoke: (device, token, target, mode) => call('revoke_device', { p_device: device, p_token: token, p_target: target, p_mode: mode }),
@@ -42,7 +41,7 @@ export function supabaseTransport({ url, key, fetchFn = (...a) => fetch(...a) })
   };
 }
 
-// ---------------------------------------------------------------- the device key lives on THIS device only: { token, role: 'main'|'linked', shop_id }
+// ---------------------------------------------------------------- the device key lives on THIS device only: { token, role: 'main'|'linked', shop_id, lease_until, seen }
 const AUTH_KEY = 'buyn_sync_auth';
 export const deviceAuth = {
   get: () => { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch { return null; } },
@@ -53,12 +52,21 @@ export const deviceAuth = {
 const PULL_PAGE = 500;
 const OVERLAP = 100;          // re-read the last rows each time: a row committed late on the server is never missed (merging twice is harmless)
 
-export function createSync({ store, meta, transport, deviceId, auth = deviceAuth, onRevoked, now = () => new Date(), intervalMs = 30000 }) {
+export function createSync({ store, meta, transport, deviceId, auth = deviceAuth, onRevoked, onLicense, now = () => new Date(), intervalMs = 30000 }) {
   let st = { state: 'off', pending: 0, last: null, error: null };
   const listeners = [];
   let running = null, again = false, timer = null, debounce = null, started = false;
   const set = (patch) => { st = { ...st, ...patch }; listeners.forEach((l) => l(st)); };
   const refreshPending = async () => { st.pending = await meta.outboxCount(); };
+  // the lease: the server renews it at every contact (14 days). Offline past that date the program locks.
+  // The device clock is not trusted to go backwards: the latest time ever seen counts.
+  const touchLease = (res) => { const a = auth.get(); if (a && res?.lease_until) auth.set({ ...a, lease_until: res.lease_until }); };
+  const leaseExpired = () => {
+    const a = auth.get(); if (!a || !a.lease_until) return false;
+    const t = Math.max(now().getTime(), a.seen || 0);
+    if (t !== a.seen) auth.set({ ...a, seen: t });
+    return t > Date.parse(a.lease_until);
+  };
   const need = () => { const a = auth.get(); if (!a) throw new SyncError('badtoken', 'NOT_LINKED'); return a; };
 
   async function pushAll(token) {
@@ -70,7 +78,7 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
         const row = store.peek(e.table, e.pk);
         if (row) rows.push({ t: e.table, k: String(e.pk), d: row, u: e.u });
       }
-      if (rows.length) await transport.push(deviceId, token, rows);
+      if (rows.length) touchLease(await transport.push(deviceId, token, rows));
       await meta.ack(ob);
     }
   }
@@ -79,6 +87,7 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
     for (let i = 0; i < 400; i++) {
       const cursor = await meta.get('cursor', 0);
       const res = await transport.pull(deviceId, token, Math.max(0, cursor - OVERLAP), PULL_PAGE);
+      touchLease(res);
       const rows = res.rows || [];
       if (rows.length) {
         const r = await store.applyRemote(rows, await meta.outboxMap(), { deviceId, now });
@@ -112,12 +121,13 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
       } catch (e) {
         await refreshPending().catch(() => {});
         if (e.kind === 'revoked') { set({ state: 'revoked', error: e.mode }); onRevoked?.(e.mode); }     // the owner disconnected this device
+        else if (e.kind === 'suspended' || e.kind === 'expired') { set({ state: 'license', error: e.kind }); onLicense?.(e.kind); }     // the license is suspended / ended: locked, nothing deleted
         else if (e.kind === 'badtoken') set({ state: 'badcode', error: 'مفتاح الجهاز غير صالح' });
         else if (e.kind === 'network') set({ state: 'offline', error: null });
         else set({ state: 'error', error: e.message });
       } finally {
         running = null;
-        if (again && st.state !== 'revoked') { again = false; setTimeout(syncNow, 1500); }
+        if (again && st.state !== 'revoked' && st.state !== 'license') { again = false; setTimeout(syncNow, 1500); }
       }
       return st;
     })();
@@ -144,7 +154,7 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
   }
   // the server gave this device its key: keep it, start from the beginning of the shop history
   async function accept(r, upload) {
-    auth.set({ token: r.token, role: r.role, shop_id: r.shop_id });
+    auth.set({ token: r.token, role: r.role, shop_id: r.shop_id, lease_until: r.lease_until, seen: now().getTime() });
     await meta.set('linked', true);
     await meta.set('cursor', 0);
     if (upload) await queueAll();
@@ -154,6 +164,8 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
   return {
     get status() { return st; },
     get role() { return auth.get()?.role ?? null; },
+    leaseExpired,
+    get leaseUntil() { return auth.get()?.lease_until ?? null; },
     get shopId() { return auth.get()?.shop_id ?? null; },
     onStatus(fn) { listeners.push(fn); fn(st); },
     syncNow,
@@ -170,20 +182,19 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
     },
     stop() { clearInterval(timer); clearTimeout(debounce); started = false; },
 
-    // ---- this device becomes the MAIN device of a new shop (needs the private setup key); all its data goes up
-    async makeMain(setupKey, name) {
+    // ---- ACTIVATION by phone number + the activation code given by the program's owner.
+    //      First time: this device becomes the MAIN device of the shop. Later (new phone): it takes the place of the previous main device (which is wiped).
+    //      Returns { recovered } so the screen knows whether a shop already existed.
+    async activate(phone, code, name) {
       if (auth.get()) throw new SyncError('server', 'ALREADY_LINKED');
-      return accept(await transport.createShop(setupKey, deviceId, name), true);
+      const r = await transport.activate(phone, code, deviceId, name);
+      await accept(r, true);
+      return { recovered: !!r.recovered };
     },
     // ---- this device joins a shop with the one-time link code made by the main device
     async join(code, name) {
       if (auth.get()) throw new SyncError('server', 'ALREADY_LINKED');
       return accept(await transport.join(code, deviceId, name), true);
-    },
-    // ---- the main device was lost: a new device takes its place with the setup key (the old one is wiped); the shop is downloaded
-    async recover(setupKey, shopId, name) {
-      if (auth.get()) throw new SyncError('server', 'ALREADY_LINKED');
-      return accept(await transport.recover(setupKey, shopId, deviceId, name), false);
     },
     // ---- main device only
     pairingCode: () => transport.pairingCode(deviceId, need().token),

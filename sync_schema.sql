@@ -6,8 +6,7 @@
 --  linked device : joined with a one-time link code, can only push / pull the shop data
 --  disconnect    : the owner chooses 'lock' (the program locks, data stays) or 'wipe' (data erased at its next contact)
 --
--- BEFORE the first use, set your private setup key (only you know it; it is needed to create a shop or to recover a lost main device):
---   update app_config set value = encode(extensions.digest('PUT-YOUR-SECRET-HERE', 'sha256'), 'hex') where key = 'setup_key_hash';
+-- THEN run license_schema.sql (activation by phone number): it replaces the setup key used by create_shop / recover_main, which it removes.
 
 create extension if not exists pgcrypto with schema extensions;
 

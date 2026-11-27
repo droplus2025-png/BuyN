@@ -594,8 +594,8 @@ test('invoice text: header row, one line per product, forced left-to-right so th
   const rows = text.split('\n').filter((l) => l.startsWith('\u200E'));
   assert.equal(rows.length, 3);
   assert.match(rows[0], /produit\s+q×p\s+Total/);
-  assert.match(rows[1], /^\u200E1- منتج 1 {3}2×25 {3}50$/);
-  assert.match(rows[2], /^\u200E2- منتج 2 {3}1×70 {3}70$/);
+  assert.match(rows[1], /^\u200E1- منتج 1\u200E {3}2×25 {3}50$/);          // Arabic name: a left-to-right mark keeps the numbers in order
+  assert.match(rows[2], /^\u200E2- منتج 2\u200E {3}1×70 {3}70$/);
 });
 
 // ---- buyN codes: <category digit><product number from 1>, product 0 does not exist, category 0 does

@@ -9,6 +9,10 @@ const TITLES = { purchase: 'فاتورة شراء', return_customer: 'إرجاع
   opening_debt_customer: 'دين سابق', opening_debt_supplier: 'مستحق سابق', cash_adjustment: 'تسوية الصندوق' };
 
 const LRM = '\u200E';                                       // forces left-to-right lines: product at the left, total at the far right
+// an Arabic name must not turn the numbers after it right-to-left (the product stays at the left, the total at the far right):
+// a left-to-right mark right after the name makes the numbers behave as in a Latin line
+const RTL = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+const ltrAfter = (name) => (RTL.test(name) ? name + LRM : name);
 const fill = (tpl, vars) => tpl.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? vars[k] : `{${k}}`));
 
 // data: { invoice, lines, party?, parentNo?, settings }
@@ -26,7 +30,7 @@ export function renderInvoice({ invoice: i, lines = [], party = null, parentNo =
 
   if (lines.length) {
     out.push(`${LRM}${L.product || 'produit'}   ${L.qp || 'q×p'}   ${L.line_total || 'Total'}`);
-    lines.forEach((l, n) => out.push(LRM + fill(t.line_format, { n: n + 1, name: l.name, qty: fmtQty(l.qty), price: fmtPrice(l.unit_price), total: fmtMoney(l.line_total) })));
+    lines.forEach((l, n) => out.push(LRM + fill(t.line_format, { n: n + 1, name: ltrAfter(l.name), qty: fmtQty(l.qty), price: fmtPrice(l.unit_price), total: fmtMoney(l.line_total) })));
     out.push(sep, `${L.items} : ${fmtQty(lines.reduce((a, l) => a + l.qty, 0))}`);
   } else if (i.note) out.push(i.note);
 

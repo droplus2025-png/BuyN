@@ -1,5 +1,5 @@
 // Administration (owner only): live store value, store settings, employees & permissions, reset.
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, qtyStr, download, fmtWhen, syncErrText, deviceName } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, qtyStr, download, fmtWhen, syncErrText, paperHtml } from './ui-core.js';
 import { APP_VERSION } from './version.js';
 import { renderInvoice } from './invoice-text.js';
 import { DEFAULT_SETTINGS } from './settings.js';
@@ -83,7 +83,8 @@ export async function renderAdmin(app) {
         <div class="kv"><span>الحالة</span><b id="syState">…</b></div>
         <div class="kv"><span>بانتظار الإرسال</span><b id="syPend">…</b></div>
         <div class="kv"><span>آخر مزامنة</span><b id="syLast">—</b></div>
-        ${role ? '<button class="btn gold" id="syNow" style="width:100%;margin-top:8px">مزامنة الآن</button>' : '<button class="btn gold" id="syMain" style="width:100%;margin-top:8px">جعل هذا الجهاز رئيسياً (ربط المحل بالسحابة)</button>'}
+        <div class="kv"><span>التفعيل صالح حتى (دون اتصال)</span><b dir="ltr">${app.sync.leaseUntil ? fmtWhen(app.sync.leaseUntil) : '—'}</b></div>
+        <button class="btn gold" id="syNow" style="width:100%;margin-top:8px">مزامنة الآن</button>
         ${role === 'main' ? '<button class="btn" id="syCode" style="width:100%;margin-top:8px">+ رمز ربط جهاز جديد</button><button class="btn" id="syDevs" style="width:100%;margin-top:8px">الأجهزة المرتبطة</button>' : ''}
         ${role === 'linked' ? '<button class="btn red" id="syOff" style="width:100%;margin-top:8px">فك ارتباط هذا الجهاز</button>' : ''}
         <div class="muted" style="font-size:.78rem;margin-top:6px">تعمل المزامنة وحدها عند توفر الإنترنت. بدون إنترنت يستمر البرنامج بالعمل وتُرسل العمليات لاحقاً. الجهاز الرئيسي وحده يربط الأجهزة ويفصلها.</div></div>
@@ -99,7 +100,7 @@ export async function renderAdmin(app) {
             <div class="lbl">عبارة الختام (تأخذ {thanks_text} من الإعدادات)</div><input class="inp tpl" data-k="footer" value="${esc(tpl.footer)}">
             ${Object.keys(DEFAULT_SETTINGS.invoice_template.labels).map((k) => `<div class="lbl">عنوان: ${k}</div><input class="inp tpl lab" data-k="${k}" value="${esc(tpl.labels[k])}">`).join('')}
           </div>
-          <div><div class="lbl">معاينة مباشرة</div><pre id="tplPreview" dir="auto" class="card" style="white-space:pre-wrap;margin:0;font:inherit;line-height:1.6;user-select:text"></pre>
+          <div><div class="lbl">معاينة مباشرة</div><div id="tplPreview" class="card inv-paper" style="margin:0"></div>
             <div class="row" style="margin-top:8px"><button class="btn" id="tplReset" style="flex:1">الافتراضي</button><button class="btn gold" id="tplSave" style="flex:1">حفظ الشكل</button></div></div>
         </div></div>
 
@@ -123,7 +124,7 @@ export async function renderAdmin(app) {
       lines: [{ name: 'منتج تجريبي 1', qty: 2000, unit_price: 250000, line_total: 5000 }, { name: 'منتج تجريبي 2', qty: 1000, unit_price: 700000, line_total: 7000 }],
       party: { name: 'اسم الزبون' }, settings: { ...c, invoice_template: readTpl() },
     });
-    const paint = () => { $('#tplPreview').textContent = sample(); };
+    const paint = () => { $('#tplPreview').innerHTML = paperHtml(sample()); };
     document.querySelectorAll('.tpl').forEach((el) => { el.addEventListener('input', paint); el.addEventListener('change', paint); });
     paint();
     $('#tplSave').onclick = async () => { try { await eng.settings.set('invoice_template', readTpl()); await app.refreshCfg(); toast('تم حفظ شكل الفاتورة'); } catch (e) { toast(errText(e), true); } };
@@ -190,14 +191,6 @@ export async function renderAdmin(app) {
     };
     app.syncHook = paintSy; paintSy(app.sync.status);
     $('#syNow')?.addEventListener('click', () => app.sync.syncNow());
-    $('#syMain')?.addEventListener('click', () => openModal({
-      title: 'جعل هذا الجهاز رئيسياً', html: `<div class="muted">يُنشأ المحل في السحابة وتُرفع إليه كل بيانات هذا الجهاز. يلزم مفتاح الإعداد السري الذي وضعتَه في قاعدة البيانات.</div>
-        <input id="sk" class="inp" type="password" placeholder="مفتاح الإعداد" autocomplete="off" style="direction:ltr"><div class="lbl">اسم هذا الجهاز</div><input id="dn" class="inp" value="${esc(deviceName())}" autocomplete="off"><div class="err" id="err"></div>`,
-      buttons: [{ label: 'إلغاء' }, { label: 'ربط', cls: 'gold', onClick: async (close, m) => {
-        const btn = m.querySelector('.mbtns .gold'); btn.disabled = true; btn.textContent = 'جارٍ الإرسال…';
-        try { await app.sync.makeMain(m.querySelector('#sk').value, m.querySelector('#dn').value.trim() || deviceName()); toast('تم الربط: هذا الجهاز هو الرئيسي'); draw(); }
-        catch (e) { m.querySelector('#err').textContent = syncErrText(e); btn.disabled = false; btn.textContent = 'ربط'; return false; }
-      } }], onOpen: (m) => m.querySelector('#sk').focus() }));
     $('#syCode')?.addEventListener('click', async () => {
       try {
         const { code, expires_at: exp } = await app.sync.pairingCode();

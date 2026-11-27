@@ -1,5 +1,5 @@
 // Invoices archive: search, filters, detail, WhatsApp, and product details for quick sales.
-import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, price4, qtyStr, TYPE_AR, fmtTime, priceShort, partySuggest, sendWhatsApp, setNext } from './ui-core.js';
+import { mount, $, esc, header, toast, errText, openModal, confirmBox, money, price4, qtyStr, TYPE_AR, fmtTime, priceShort, partySuggest, sendWhatsApp, setNext, paperHtml } from './ui-core.js';
 import { openExternal } from './ui-external.js';
 import { printText } from './print.js';
 
@@ -10,7 +10,7 @@ export async function showInvoice(app, idOrNo) {
   try { msg = await eng.share.invoiceMessage(idOrNo); } catch (e) { return toast(errText(e), true); }
   openModal({
     title: 'الفاتورة', tall: true,
-    html: `<pre dir="auto" style="white-space:pre-wrap;margin:0;font:inherit;line-height:1.6;user-select:text">${esc(msg.text)}</pre>`,
+    html: `<div class="inv-paper" style="padding:0;border:0;background:none">${paperHtml(msg.text)}</div>`,
     buttons: [{ label: 'إغلاق' }, { label: 'طباعة', onClick: () => { printText(msg.text); return false; } }, { label: 'واتساب', cls: 'gold', onClick: () => sendWhatsApp(eng, msg) }],
   });
 }
@@ -78,7 +78,7 @@ export async function renderInvoices(app, params = {}) {
       + (can.view_cost_profit && i.profit !== undefined && ['sale', 'quick_sale', 'return_customer'].includes(i.type)
         ? `<div class="kv"><span>${d.has_detail ? 'الربح الحقيقي' : i.type === 'quick_sale' ? 'الربح (نسبة جزافية)' : 'الربح'}</span><b>${money(d.real_profit ?? i.profit)}</b></div>` : '');
     out().innerHTML = `
-      <div class="inv-paper">${msg.text.split('\n').map((ln) => `<div dir="auto">${esc(ln) || '&nbsp;'}</div>`).join('')}</div>
+      <div class="inv-paper">${paperHtml(msg.text)}</div>
       ${inner ? `<div class="card">${inner}</div>` : ''}
       <div class="row"><button class="btn gold big" id="wa" style="flex:1">واتساب / نسخ</button><button class="btn big" id="prt" style="flex:1">🖨 طباعة</button></div>
       ${d.quick_pending && can.quick_sale ? '<button class="btn amber big" id="det">إضافة التفاصيل</button>' : ''}`;

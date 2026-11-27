@@ -26,7 +26,8 @@ const ERR = {
   BAD_PARENT: 'هذه الفاتورة لا تقبل هذه العملية', CANNOT_ALLOCATE: 'تعذّر توزيع المبلغ على هذه الكميات', INVOICE_NOT_FOUND: 'الفاتورة غير موجودة',
 };
 // refusals of the cloud sync (SyncError.kind)
-const SYNC_ERR = { badpair: 'رمز الربط غير صحيح أو منتهي أو مستعمل', badkey: 'مفتاح الإعداد غير صحيح', keynotset: 'لم يُضبط مفتاح الإعداد في قاعدة البيانات بعد',
+const SYNC_ERR = { badpair: 'رمز الربط غير صحيح أو منتهي أو مستعمل', badactivation: 'رقم الهاتف أو رمز التفعيل غير صحيح',
+  suspended: 'الترخيص موقوف، تواصل مع المزوّد', expired: 'انتهى الترخيص، تواصل مع المزوّد', limit: 'بلغت الحد الأقصى لعدد الأجهزة المسموح بها',
   throttled: 'محاولات خاطئة كثيرة، انتظر 10 دقائق', notmain: 'هذه العملية للجهاز الرئيسي فقط', network: 'لا يوجد اتصال بالإنترنت', taken: 'هذا الجهاز مسجَّل من قبل',
   notfound: 'غير موجود', revoked: 'هذا الجهاز مفصول عن المحل', badtoken: 'مفتاح الجهاز غير صالح' };
 export const syncErrText = (e) => SYNC_ERR[e?.kind] || (e?.message === 'SERVER_EMPTY' ? 'لا توجد بيانات محل في السحابة بعد' : e?.message === 'ALREADY_LINKED' ? 'هذا الجهاز مرتبط من قبل' : errText(e));
@@ -76,6 +77,9 @@ export const confirmBox = (title, text, yes = 'متابعة', no = 'رجوع') =
   title, html: `<div>${esc(text)}</div>`,
   buttons: [{ label: no, onClick: () => res(false) }, { label: yes, cls: 'gold', onClick: () => res(true) }],
 }));
+
+// invoice text shown line by line, each line choosing its own direction (the line starts with a left-to-right mark)
+export const paperHtml = (text) => String(text).split('\n').map((ln) => `<div dir="auto">${esc(ln) || '&nbsp;'}</div>`).join('');
 
 // header: back (right) | title (center) | logo (left)
 export function header(title, backLabel = 'رجوع') {
