@@ -108,7 +108,7 @@ export async function renderAdmin(app) {
         <button class="btn" id="chCode" style="width:100%">تغيير كلمة مرور المالك</button>
         <div class="kv"><span>إصدار البرنامج</span><b>${APP_VERSION}</b></div>
         <button class="btn red" id="reset" style="margin-top:8px;width:100%">تصفير العمليات (للتجارب) — يُبقي المنتجات والمخزون</button>
-        <button class="btn red" id="resetStock" style="margin-top:8px;width:100%">تصفير المخزون — يحذف كل المنتجات لإعادة استيرادها من Excel</button></div>`;
+        <button class="btn red" id="resetStock" style="margin-top:8px;width:100%">حذف كل المنتجات — قابل للاسترجاع من المخزون ← «المحذوفة»</button></div>`;
 
     // ---- invoice template editor with live preview
     const readTpl = () => {
@@ -223,16 +223,13 @@ export async function renderAdmin(app) {
     // empty the stock: a backup file is saved first, then the word "تصفير" must be typed
     $('#resetStock').onclick = async () => {
       let n = 0; try { n = (await eng.products.search('', 100000)).length; } catch { /* count only */ }
-      openModal({ title: 'تصفير المخزون',
-        html: `<div class="err" style="margin-bottom:8px">سيُحذف ${n ? `<b>${n}</b> ` : ''}منتج بكل كمياتها وأسعارها، وتُحرَّر أرقام المنتجات. لا يمكن التراجع إلا بالنسخة الاحتياطية التي تُحفظ تلقائياً الآن.</div>
-          <div class="muted" style="font-size:.85rem">يتطلب عدم وجود فواتير (استعمل «تصفير العمليات» أولاً). بعده: المخزون ← لصق من Excel.</div>
+      openModal({ title: 'حذف كل المنتجات',
+        html: `<div class="err" style="margin-bottom:8px">سيُخفى ${n ? `<b>${n}</b> ` : ''}منتج من المخزون. لا يُحذف شيء نهائياً: الأرقام تبقى محجوزة، والكميات والأسعار محفوظة، ويمكن استرجاعها من المخزون ← «المحذوفة» (منتجاً منتجاً أو الكل).</div>
           <div class="lbl">اكتب كلمة «تصفير» للتأكيد</div><input id="w" class="inp" autocomplete="off"><div class="err" id="err"></div>`,
-        buttons: [{ label: 'إلغاء' }, { label: 'حفظ نسخة ثم تصفير', cls: 'red', onClick: async (close, m) => {
+        buttons: [{ label: 'إلغاء' }, { label: 'حذف الكل', cls: 'red', onClick: async (close, m) => {
           if (m.querySelector('#w').value.trim() !== 'تصفير') { m.querySelector('#err').textContent = 'اكتب الكلمة كما هي'; return false; }
-          try {
-            const f = await makeFile(); download(f, `avant-reset-stock-${f.name}`);                // safety copy first
-            const r = await eng.admin.resetStock(); toast(`تم تصفير المخزون · حُذف ${r.products_removed} منتج`, false, 3500); draw();
-          } catch (e) { m.querySelector('#err').textContent = errText(e); return false; }
+          try { const r = await eng.admin.resetStock(); toast(`حُذف ${r.products_removed} منتج (قابلة للاسترجاع)`, false, 3500); draw(); }
+          catch (e) { m.querySelector('#err').textContent = errText(e); return false; }
         } }],
         onOpen: (m) => m.querySelector('#w').focus() });
     };

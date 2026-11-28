@@ -525,22 +525,36 @@ test('settings: sale_beep defaults to on and the owner can switch it off', async
   assert.equal((await w.owner.settings.get()).sale_beep, false);
 });
 
-test('reset stock: owner only, refused while invoices use products, frees the SKUs for a clean Excel re-import', async () => {
+test('deleting is never final: numbers stay reserved, deleted products can be listed and restored (one by one or all)', async () => {
   const w = await world();
-  await w.owner.products.create({ name: 'Marteau', purchasePrice: '30', salePrice: '40', qty: '5' });
+  const m = await w.owner.products.create({ name: 'Marteau', purchasePrice: '30', salePrice: '40', qty: '5' });
   await w.owner.products.create({ name: 'Clou', purchasePrice: '1', salePrice: '2', qty: '100' });
   await rejects(w.emp.admin.resetStock(), 'PERMISSION_DENIED');
-  const p = (await w.owner.products.search('', 10))[0];
-  await w.owner.sale({ paid: '40', lines: [{ productId: p.id, qty: '1', price: '40' }] });
-  await rejects(w.owner.admin.resetStock(), 'STOCK_HAS_HISTORY');
-  await w.owner.admin.resetOperations();
-  const r = await w.owner.admin.resetStock();
+  await w.owner.sale({ paid: '40', lines: [{ productId: m.id, qty: '1', price: '40' }] });
+  const r = await w.owner.admin.resetStock();                      // allowed even with invoices: nothing is destroyed
   assert.equal(r.products_removed, 2);
   assert.equal((await w.owner.products.search('', 10)).length, 0);
-  const imp = await w.owner.products.import([{ sku: '01', name: 'Marteau', purchasePrice: '30', salePrice: '40', qty: '5' }, { sku: '02', name: 'Clou', purchasePrice: '1', salePrice: '2', qty: '100' }]);
-  assert.equal(imp.created, 2); assert.equal(imp.skipped.length, 0);
-  const again = await w.owner.products.search('', 10);
-  assert.deepEqual(again.map((x) => x.sku).sort(), ['01', '02']);
+  const gone = await w.owner.products.listDeleted();
+  assert.deepEqual(gone.map((x) => x.sku), ['01', '02']);
+  await rejects(w.emp.products.listDeleted(), 'PERMISSION_DENIED');
+  const created = await w.owner.products.create({ name: 'Scie' });
+  assert.equal(created.sku, '03');                                 // 01 and 02 are never given again
+  await w.owner.products.create({ name: 'Marteau' });              // the name was taken meanwhile
+  await rejects(w.owner.products.restore(m.id), 'PRODUCT_EXISTS');
+  const rep = await w.owner.products.restoreAll();
+  assert.equal(rep.restored, 1); assert.equal(rep.skipped.length, 1);
+  const back = (await w.owner.products.search('Clou', 5))[0];
+  assert.equal(back.qty, 100000); assert.equal(back.sku, '02');    // quantity and number are intact
+  assert.deepEqual(await w.owner.reports.integrityCheck(), []);
+  await w.owner.admin.resetOperations();                           // still works after all of this
+});
+
+test('paste import: the chosen category gives the numbers (names only)', async () => {
+  const w = await world();
+  const rep = await w.owner.products.import(parsePasteRows('Scie\nRabot').map((r) => ({ ...r, cat: '4' })));
+  assert.equal(rep.created, 2);
+  assert.deepEqual((await w.owner.products.search('', 10)).map((p) => p.sku), ['41', '42']);
+  await rejects(w.owner.products.import([{ name: 'X', cat: 'a' }]), 'BAD_CATEGORY');
 });
 
 test('quick sale details: optional customer typed with the details (sync-safe: stored on the detail record)', async () => {

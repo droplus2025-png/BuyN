@@ -1,6 +1,6 @@
 // Service worker: works offline, and always prefers the NEWEST files when online
 // (network first, cache as fallback) so a new publication is picked up automatically.
-const CACHE = 'buyn-shell-v28';
+const CACHE = 'buyn-shell-v29';
 const FILES = ['./', 'index.html', 'app.js', 'version.js', 'manifest.webmanifest', 'admin.js', 'auth.js', 'backup.js', 'beep.js', 'calc.js', 'cart.js', 'cash.js', 'errors.js', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'idb-persist.js', 'index.js', 'invoice-number.js', 'invoice-text.js', 'logo.png', 'memory-store.js', 'money.js', 'parties.js', 'payments.js', 'pc.css', 'permissions.js', 'phone.js', 'post.js', 'print.js', 'products.js', 'purchases.js', 'queries.js', 'quick-detail.js', 'returns.js', 'sales.js', 'settings.js', 'share.js', 'style.css', 'sync-config.js', 'sync-merge.js', 'sync.js', 'ui-admin.js', 'ui-calc.js', 'ui-cash.js', 'ui-core.js', 'ui-debts.js', 'ui-expenses.js', 'ui-external.js', 'ui-home.js', 'ui-invoices.js', 'ui-login.js', 'ui-pc.js', 'ui-productform.js', 'ui-purchase.js', 'ui-returns.js', 'ui-sale.js', 'ui-stock.js', 'viewport.js', 'NotoNaskhArabic-Regular.woff', 'NotoNaskhArabic-Medium.woff', 'NotoNaskhArabic-SemiBold.woff', 'NotoNaskhArabic-Bold.woff'];
 
 self.addEventListener('install', (e) => {

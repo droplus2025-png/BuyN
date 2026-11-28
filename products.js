@@ -129,6 +129,37 @@ export function productsApi(ctx) {
       });
     },
 
+    // a deleted product is only hidden: its number stays reserved and it can always come back, with its quantity and prices
+    async listDeleted() {
+      ctx.access.require('manage_stock');
+      return store.transaction(async (tx) => (await tx.find('products', (p) => !!p.deleted_at)).sort((a, b) => skuCmp(a.sku, b.sku)));
+    },
+    async restore(id) {
+      ctx.access.require('manage_stock');
+      return store.transaction(async (tx) => {
+        const p = await tx.get('products', id);
+        if (!p || !p.deleted_at) fail('UNKNOWN_PRODUCT', 'Unknown product');
+        await assertNameFree(tx, p.name, id);                                     // another product took the name meanwhile
+        const u = await tx.update('products', id, { deleted_at: null, updated_at: ctx.now().toISOString() });
+        await audit(ctx, tx, 'update', 'products', id, p, u);
+        return u;
+      });
+    },
+    // every deleted product whose name is still free comes back; the others are reported
+    async restoreAll() {
+      ctx.access.require('manage_stock');
+      return store.transaction(async (tx) => {
+        const report = { restored: 0, skipped: [] };
+        for (const p of (await tx.find('products', (x) => !!x.deleted_at)).sort((a, b) => skuCmp(a.sku, b.sku))) {
+          if ((await tx.find('products', (x) => !x.deleted_at && nameKey(x.name) === nameKey(p.name)))[0]) { report.skipped.push({ sku: p.sku, name: p.name, reason: 'exists' }); continue; }
+          const u = await tx.update('products', p.id, { deleted_at: null, updated_at: ctx.now().toISOString() });
+          await audit(ctx, tx, 'update', 'products', p.id, p, u);
+          report.restored++;
+        }
+        return report;
+      });
+    },
+
     // manual correction of the quantity (damage, inventory count): journaled movement
     async adjustStock(id, delta, reason = 'adjustment') {
       ctx.access.require('manage_stock');
@@ -177,6 +208,7 @@ export function productsApi(ctx) {
           seenNames.add(nameKey(name)); if (sku) seenSkus.add(sku);
           if ((await tx.find('products', p => !p.deleted_at && nameKey(p.name) === nameKey(name)))[0]) { report.skipped.push({ name, reason: 'exists' }); continue; }
           if (sku && (await tx.find('products', p => p.sku === sku))[0]) { report.skipped.push({ name, reason: 'sku_taken' }); continue; }
+          if (!sku && !/^[0-9]$/.test(String(r.cat ?? '0'))) fail('BAD_CATEGORY', 'Category is one digit 0-9');
           const wanted = sku || await nextSku(tx, String(r.cat ?? '0'));
           const t = ctx.now().toISOString();
           const cost = parsePrice(r.purchasePrice ?? 0, 'purchase price');

@@ -11,7 +11,7 @@ export async function renderStock(app) {
     <input id="q" class="inp" placeholder="🔍 بحث: اسم المنتج أو رقمه" autocomplete="off">
     <div class="row">
       ${can.add_product ? '<button class="btn gold" id="add" style="flex:1">+ إضافة</button>' : ''}
-      ${can.manage_stock ? '<button class="btn" id="paste" style="flex:1">لصق من Excel</button><button class="btn" id="csv" style="flex:1">⬇ تصدير CSV</button>' : ''}
+      ${can.manage_stock ? '<button class="btn" id="paste" style="flex:1">لصق من Excel</button><button class="btn" id="csv" style="flex:1">⬇ تصدير CSV</button><button class="btn" id="trash" style="flex:1">المحذوفة</button>' : ''}
     </div>
     <div class="muted" id="count"></div>
     <div id="list" style="overflow:auto;flex:1;min-height:0"></div></div></div>`);
@@ -62,7 +62,7 @@ export async function renderStock(app) {
         <div class="err" id="err"></div>`,
       buttons: [{ label: 'إلغاء' },
         ...(can.manage_stock ? [{ label: 'حذف', cls: 'red', onClick: async (close, m) => {
-          if (!(await confirmBox('حذف المنتج', `حذف «${p.name}»؟ يبقى رقمه محجوزاً ولا يُعطى لمنتج آخر.`, 'حذف', 'إلغاء'))) return false;
+          if (!(await confirmBox('حذف المنتج', `حذف «${p.name}»؟ يبقى رقمه محجوزاً ولا يُعطى لمنتج آخر، ويمكنك استرجاعه في أي وقت من زر «المحذوفة».`, 'حذف', 'إلغاء'))) return false;
           try { await eng.products.remove(p.id); toast('تم الحذف'); load(); } catch (e) { m.querySelector('#err').textContent = errText(e); return false; }
         } }] : []),
         { label: 'حفظ', cls: 'gold', onClick: async (close, m) => {
@@ -84,18 +84,51 @@ export async function renderStock(app) {
 
   $('#add')?.addEventListener('click', () => openProductForm(app, { onDone: load }));
 
+  // ---- paste from Excel: the category MUST be chosen first (it gives the numbers of the lines that come without a code)
   $('#paste')?.addEventListener('click', () => openModal({
     title: 'لصق من Excel', tall: true,
-    html: `<div class="muted" style="font-size:.85rem">الأعمدة بالترتيب: الرقم ← المنتج ← سعر الشراء ← سعر البيع ← الكمية. الفاصل: Tab (من Excel) أو ;<br><b>عمود الأسماء وحده مقبول</b>: كل سطر باسم فقط يُضاف بكمية وأسعار 0.<br>الأسطر الفارغة تُتجاهل، والمكرر يبقى مرة واحدة. (ملف التصدير يُعاد استيراده كما هو.)</div>
+    html: `<div class="lbl">1 · اختر الصنف (إلزامي)</div>
+      <div class="catrow" dir="ltr" id="pcat">${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `<button type="button" data-d="${d}">${d}</button>`).join('')}</div>
+      <div class="muted" id="pcn" style="margin-bottom:.4rem">لم يُختر صنف بعد</div>
+      <div class="lbl">2 · الصق القائمة</div>
+      <div class="muted" style="font-size:.85rem">الأعمدة بالترتيب: الرقم ← المنتج ← سعر الشراء ← سعر البيع ← الكمية. الفاصل: Tab (من Excel) أو ;<br><b>عمود الأسماء وحده مقبول</b>: كل سطر باسم فقط يُضاف في الصنف المختار بكمية وأسعار 0. السطر الذي يبدأ برقم منتج يأخذ صنف رقمه.<br>الأسطر الفارغة تُتجاهل، والمكرر يبقى مرة واحدة.</div>
       <label style="display:flex;gap:.5rem;align-items:center;margin:.5rem 0"><input type="checkbox" id="names"> أسماء فقط (أول عمود = الاسم، والباقي يُهمل، والكمية والأسعار 0)</label>
       <textarea id="ta" class="inp" rows="7" dir="auto" placeholder="Marteau&#10;Vis 6mm&#10;Clou"></textarea><div class="err" id="err"></div>`,
     buttons: [{ label: 'إلغاء' }, { label: 'استيراد', cls: 'gold', onClick: async (close, m) => {
-      const rows = parsePasteRows(m.querySelector('#ta').value, { namesOnly: m.querySelector('#names').checked });
+      const cat = m.dataset.cat;
+      if (cat === undefined) { m.querySelector('#err').textContent = 'اختر الصنف أولاً'; return false; }
+      const rows = parsePasteRows(m.querySelector('#ta').value, { namesOnly: m.querySelector('#names').checked }).map((r) => (r.sku ? r : { ...r, cat }));
+      if (!rows.length) { m.querySelector('#err').textContent = 'الصق القائمة أولاً'; return false; }
       try { const r = await eng.products.import(rows); toast(`أُضيف ${r.created} · تُجوهل ${r.skipped.length}`, false, 3500); load(); }
       catch (e) { m.querySelector('#err').textContent = errText(e); return false; }
     } }],
-    onOpen: (m) => m.querySelector('#ta').focus(),
+    onOpen: (m) => {
+      m.querySelectorAll('#pcat button').forEach((b) => b.addEventListener('click', () => {
+        m.dataset.cat = b.dataset.d;
+        m.querySelectorAll('#pcat button').forEach((x) => x.classList.toggle('on', x === b));
+        m.querySelector('#pcn').innerHTML = `الصنف <b>${b.dataset.d}</b> · ${esc(catName(b.dataset.d) || 'بدون اسم')}`;
+        m.querySelector('#err').textContent = '';
+      }));
+    },
   }));
+
+  // ---- deleted products: never final, every one can come back (its number was never given to another product)
+  $('#trash')?.addEventListener('click', async () => {
+    let gone; try { gone = await eng.products.listDeleted(); } catch (e) { toast(errText(e), true); return; }
+    const row = (p) => `<div class="trow" style="direction:ltr;display:grid;grid-template-columns:3.2rem 1fr 4rem auto;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
+      <b>${esc(p.sku)}</b><span>${esc(p.name)}</span><span class="muted">${qtyStr(p.qty) || 0}</span><button class="btn" data-id="${p.id}">استرجاع</button></div>`;
+    const m = openModal({ title: `المنتجات المحذوفة (${gone.length})`, tall: true,
+      html: gone.length ? `<div id="gl" style="overflow:auto;max-height:55vh">${gone.map(row).join('')}</div><div class="err" id="err"></div>` : '<div class="muted">لا توجد منتجات محذوفة</div>',
+      buttons: [{ label: 'إغلاق' }, ...(gone.length ? [{ label: 'استرجاع الكل', cls: 'gold', onClick: async (close, mm) => {
+        try { const r = await eng.products.restoreAll(); toast(`أُرجع ${r.restored}${r.skipped.length ? ` · ${r.skipped.length} اسمها مستعمل الآن` : ''}`, false, 3500); load(); }
+        catch (e) { mm.querySelector('#err').textContent = errText(e); return false; }
+      } }] : [])],
+    });
+    m.el.querySelectorAll('#gl button[data-id]').forEach((b) => b.addEventListener('click', async () => {
+      try { await eng.products.restore(b.dataset.id); b.closest('.trow').remove(); toast('تم الاسترجاع'); load(); }
+      catch (e) { m.el.querySelector('#err').textContent = errText(e); }
+    }));
+  });
 
   // ---- CSV for Excel (UTF-8 with BOM so Arabic names display correctly)
   $('#csv')?.addEventListener('click', async () => {
