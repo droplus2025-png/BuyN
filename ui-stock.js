@@ -1,6 +1,6 @@
 // Stock screen: products grouped by category, LTR table (code | product | purchase | sale | quantity).
 // The owner taps a row to edit quantity, prices, number and name. A row with 0 in number / purchase / sale / quantity is RED.
-import { catOf } from './products.js';
+import { catOf, parsePasteRows } from './products.js';
 import { openProductForm } from './ui-productform.js';
 import { mount, $, esc, header, toast, errText, openModal, confirmBox, price4, qtyStr, priceShort, download, setNext } from './ui-core.js';
 
@@ -86,16 +86,11 @@ export async function renderStock(app) {
 
   $('#paste')?.addEventListener('click', () => openModal({
     title: 'لصق من Excel', tall: true,
-    html: `<div class="muted" style="font-size:.85rem">الأعمدة بالترتيب: الرقم ← المنتج ← سعر الشراء ← سعر البيع ← الكمية. الفاصل: Tab (من Excel) أو ;<br>الأسطر الفارغة تُتجاهل، والمكرر يبقى مرة واحدة. (ملف التصدير يُعاد استيراده كما هو.)</div>
-      <textarea id="ta" class="inp" rows="7" dir="ltr" placeholder="1;Marteau;30;40;5"></textarea><div class="err" id="err"></div>`,
+    html: `<div class="muted" style="font-size:.85rem">الأعمدة بالترتيب: الرقم ← المنتج ← سعر الشراء ← سعر البيع ← الكمية. الفاصل: Tab (من Excel) أو ;<br><b>عمود الأسماء وحده مقبول</b>: كل سطر باسم فقط يُضاف بكمية وأسعار 0.<br>الأسطر الفارغة تُتجاهل، والمكرر يبقى مرة واحدة. (ملف التصدير يُعاد استيراده كما هو.)</div>
+      <label style="display:flex;gap:.5rem;align-items:center;margin:.5rem 0"><input type="checkbox" id="names"> أسماء فقط (أول عمود = الاسم، والباقي يُهمل، والكمية والأسعار 0)</label>
+      <textarea id="ta" class="inp" rows="7" dir="auto" placeholder="Marteau&#10;Vis 6mm&#10;Clou"></textarea><div class="err" id="err"></div>`,
     buttons: [{ label: 'إلغاء' }, { label: 'استيراد', cls: 'gold', onClick: async (close, m) => {
-      const rows = [];
-      for (const line of m.querySelector('#ta').value.split('\n')) {
-        const c = line.split(/\t|;/).map((x) => x.trim());
-        if (c.length < 2 || !c[1]) continue;
-        if (c[0] && !/^\d+$/.test(c[0])) continue;                      // header line
-        rows.push({ sku: c[0] || undefined, name: c[1], purchasePrice: c[2] || '0', salePrice: c[3] || '0', qty: c[4] || '0' });
-      }
+      const rows = parsePasteRows(m.querySelector('#ta').value, { namesOnly: m.querySelector('#names').checked });
       try { const r = await eng.products.import(rows); toast(`أُضيف ${r.created} · تُجوهل ${r.skipped.length}`, false, 3500); load(); }
       catch (e) { m.querySelector('#err').textContent = errText(e); return false; }
     } }],

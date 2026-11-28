@@ -236,10 +236,17 @@ export async function renderAdmin(app) {
         } }],
         onOpen: (m) => m.querySelector('#w').focus() });
     };
-    $('#reset').onclick = async () => {
-      if (!(await confirmBox('تصفير العمليات', 'ستُحذف كل الفواتير والزبناء والموردين والصندوق. تبقى المنتجات والمخزون. متابعة؟', 'تصفير', 'إلغاء'))) return;
-      try { const r = await eng.admin.resetOperations(); toast(`تم التصفير · ${r.products_kept} منتج محفوظ`); draw(); } catch (e) { toast(errText(e), true); }
-    };
+    $('#reset').onclick = () => openModal({ title: 'تصفير العمليات',
+      html: `<div class="err" style="margin-bottom:8px">ستُحذف كل الفواتير والزبناء والموردين والديون والصندوق. تبقى المنتجات والمخزون. لا يمكن التراجع إلا بالنسخة الاحتياطية التي تُحفظ تلقائياً الآن.</div>
+        <div class="lbl">اكتب كلمة «تصفير» للتأكيد</div><input id="w" class="inp" autocomplete="off"><div class="err" id="err"></div>`,
+      buttons: [{ label: 'إلغاء' }, { label: 'حفظ نسخة ثم تصفير', cls: 'red', onClick: async (close, m) => {
+        if (m.querySelector('#w').value.trim() !== 'تصفير') { m.querySelector('#err').textContent = 'اكتب الكلمة كما هي'; return false; }
+        try {
+          const f = await makeFile(); download(f, `avant-reset-operations-${f.name}`);                // safety copy first
+          const r = await eng.admin.resetOperations(); toast(`تم التصفير · ${r.products_kept} منتج محفوظ`); draw();
+        } catch (e) { m.querySelector('#err').textContent = errText(e); return false; }
+      } }],
+      onOpen: (m) => m.querySelector('#w').focus() });
   }
 
   // the devices of the shop (main device): who, when last seen, disconnect with the owner's choice (lock / wipe)

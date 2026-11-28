@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createEngine, createMemoryStore, createAuth, EngineError, money } from './index.js';
 import { createAccess } from './permissions.js';
 import { postInvoice } from './post.js';
+import { parsePasteRows } from './products.js';
 import { renderInvoice } from './invoice-text.js';
 
 // Clock: 13 Nov 2026 21:46 (Casablanca) + 1 s per call, so FIFO order is deterministic
@@ -695,4 +696,44 @@ test('store: applyRemote ignores rows it already holds and stays fast on a large
   const fresh = Array.from({ length: 500 }, (_, i) => ({ t: 'stock_movements', k: `n${i}`, d: { id: `n${i}`, product_id: 'p', reason: 'sale', qty_delta: 0, created_at: 'b' }, u: 'b' }));
   assert.equal((await store.applyRemote(fresh, new Map(), { deviceId: 'me' })).applied, 500);
   assert.equal(store.peek('stock_movements', 'n499').id, 'n499');
+});
+
+test('paste import: a names-only column is accepted, qty and prices are 0, columns never shift', async () => {
+  assert.deepEqual(parsePasteRows('Marteau\r\n\r\nVis 6mm\nClou'), [
+    { name: 'Marteau', purchasePrice: '0', salePrice: '0', qty: '0' },
+    { name: 'Vis 6mm', purchasePrice: '0', salePrice: '0', qty: '0' },
+    { name: 'Clou', purchasePrice: '0', salePrice: '0', qty: '0' }]);
+  assert.deepEqual(parsePasteRows('Scie\t12\t30\t40'), [{ name: 'Scie', purchasePrice: '0', salePrice: '0', qty: '0' }]);   // name first: extra columns ignored
+  assert.equal(parsePasteRows('١٢;Marteau;30;40;5')[0].sku, '12');
+  assert.deepEqual(parsePasteRows('1;Marteau;30;40;5'), [{ sku: '1', name: 'Marteau', purchasePrice: '30', salePrice: '40', qty: '5' }]);
+  assert.deepEqual(parsePasteRows('Vis;5;9', { namesOnly: true }), [{ name: 'Vis', purchasePrice: '0', salePrice: '0', qty: '0' }]);
+  assert.deepEqual(parsePasteRows('Sku;Produit;PA;AV;Qte\n01;Pince;1;2;3').map((r) => r.name), ['Pince']);
+  const w = await world();
+  const rep = await w.owner.products.import(parsePasteRows('Marteau\nVis\nmarteau\nClou'));
+  assert.equal(rep.created, 3); assert.equal(rep.skipped.length, 1);
+  const all = await w.owner.products.search('', 10);
+  assert.ok(all.every((p) => p.qty === 0 && p.sale_price === 0 && p.purchase_price === 0));
+  assert.deepEqual(await w.owner.reports.integrityCheck(), []);
+});
+
+test('field safety: Arabic digits, no sale at price 0, double tap, names with extra spaces', async () => {
+  assert.equal(money.parseMoney('١٢٫٥'), 1250);                       // Arabic keyboard digits and decimal mark
+  assert.equal(money.parseQty('٣'), 3000);
+  assert.equal(money.parseMoney('1٬250'), 125000);
+  const { normPhone } = await import('./phone.js');
+  assert.equal(normPhone('٠٦٦٣١٥٢٤٧٤'), normPhone('0663152474'));
+
+  const w = await world();
+  const bare = await w.owner.products.create({ name: 'Vis   6mm' });   // imported by name only: price 0
+  assert.equal(bare.name, 'Vis 6mm');
+  await rejects(w.owner.products.create({ name: 'vis 6MM' }), 'PRODUCT_EXISTS');
+  await rejects(w.owner.sale({ lines: [{ productId: bare.id, qty: '1' }] }), 'ZERO_PRICE');
+  await rejects(w.owner.sale({ lines: [{ external: { name: 'x', cost: '1', price: '0', qty: '1' } }] }), 'ZERO_PRICE');
+  await w.owner.products.update(bare.id, { salePrice: '5' });
+  const same = { lines: [{ productId: bare.id, qty: '1' }], paid: '5' };
+  const [a, b] = await Promise.all([w.owner.sale(same), w.owner.sale(same)]);     // the same button tapped twice
+  assert.equal(a.invoice.id, b.invoice.id);
+  const inv = await w.owner.reports.invoices({});
+  assert.equal(inv.filter((i) => i.type === 'sale').length, 1);
+  assert.deepEqual(await w.owner.reports.integrityCheck(), []);
 });

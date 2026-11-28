@@ -1,9 +1,33 @@
 // Products: SKU never reused, price history, stock only through movements.
 import { fail } from './errors.js';
-import { parseScaled, parsePrice, parseQty, fmtPrice, fmtQty } from './money.js';
+import { parseScaled, parsePrice, parseQty, fmtPrice, fmtQty, latinDigits } from './money.js';
 import { audit, applyMovement } from './post.js';
 
-const nameKey = (s) => String(s).trim().toLowerCase();
+const cleanName = (s) => String(s).replace(/\s+/g, ' ').trim();
+const nameKey = (s) => cleanName(s).toLowerCase();
+
+// Paste text (Excel / ;) -> import rows. A line with ONE column (or names-only mode) is a bare product name: qty and prices stay 0.
+// Full lines are: code ; product ; purchase ; sale ; qty  (a first cell that is not a code makes the line a bare name, never shifts columns).
+const HEAD_CELLS = new Set(['sku', 'code', 'produit', 'name', 'product', 'الرقم', 'الكود', 'المنتج', 'الاسم', 'اسم المنتج']);
+export function parsePasteRows(text, { namesOnly = false } = {}) {
+  const rows = [];
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const c = line.split(/\t|;/).map((x) => x.trim().replace(/^"(.*)"$/, '$1').trim());
+    if (c.length > 1 && /^[\d\u0660-\u0669\u06F0-\u06F9]+$/.test(c[0])) c[0] = latinDigits(c[0]);          // code typed with Arabic digits
+    if (!c.some(Boolean)) continue;
+    if (c.some((x) => HEAD_CELLS.has(x.toLowerCase())) && c.length > 1) continue;     // header line
+    const bare = namesOnly || c.length === 1 || !/^\d+$/.test(c[0]);
+    if (bare) {
+      const name = c.find(Boolean);
+      if (!name || (c.length === 1 && HEAD_CELLS.has(name.toLowerCase()))) continue;
+      rows.push({ name, purchasePrice: '0', salePrice: '0', qty: '0' });
+      continue;
+    }
+    if (!c[1]) continue;
+    rows.push({ sku: c[0], name: c[1], purchasePrice: c[2] || '0', salePrice: c[3] || '0', qty: c[4] || '0' });
+  }
+  return rows;
+}
 // sale price: max 2 decimals (like the database column)
 const parseSalePrice = (v, label) => parseScaled(v, 2, label) * 100;
 
@@ -42,7 +66,7 @@ export function productsApi(ctx) {
         if (!CODE_RE.test(wanted)) fail('BAD_SKU', 'Code = category digit + product number (1, 2, 3...)');
         if ((await tx.find('products', p => p.sku === wanted))[0]) fail('SKU_TAKEN', `SKU ${wanted} is used`, { sku: wanted });
         const t = ctx.now().toISOString();
-        const p = await tx.insert('products', { id: ctx.ids(), sku: wanted, cat: catOf(wanted), num: numOf(wanted), name: String(name).trim(),
+        const p = await tx.insert('products', { id: ctx.ids(), sku: wanted, cat: catOf(wanted), num: numOf(wanted), name: cleanName(name),
           purchase_price: parsePrice(purchasePrice, 'purchase price'), sale_price: parseSalePrice(salePrice, 'sale price'),
           qty: 0, deleted_at: null, origin_device: ctx.deviceId ?? null, created_at: t, updated_at: t });
         await reserveSku(ctx, tx, wanted, p.id);
@@ -71,7 +95,7 @@ export function productsApi(ctx) {
         const p = await tx.get('products', id);
         if (!p || p.deleted_at) fail('UNKNOWN_PRODUCT', 'Unknown product');
         const patch = {};
-        if (name !== undefined) { await assertNameFree(tx, name, id); patch.name = String(name).trim(); }
+        if (name !== undefined) { await assertNameFree(tx, name, id); patch.name = cleanName(name); }
         if (purchasePrice !== undefined) { ctx.access.require('edit_purchase_price'); patch.purchase_price = parsePrice(purchasePrice, 'purchase price'); }
         if (salePrice !== undefined) { ctx.access.require('edit_sale_price'); patch.sale_price = parseSalePrice(salePrice, 'sale price'); }
         if (sku !== undefined && String(sku) !== p.sku) {

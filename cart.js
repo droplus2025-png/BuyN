@@ -13,7 +13,9 @@ export async function buildCartLines(ctx, tx, inputLines, { blankPriceIsDefault 
       if (!e.name || !String(e.name).trim()) fail('NAME_REQUIRED', 'External product needs a name');
       const qty = parseQty(e.qty ?? 1, 'qty');
       if (qty <= 0) fail('BAD_NUMBER', 'Quantity must be positive');
-      lines.push({ kind: 'external', name: String(e.name).trim(), qty, unit_price: parsePrice(e.price, 'sale price'), unit_cost: parsePrice(e.cost ?? 0, 'purchase price') });
+      const ePrice = parsePrice(e.price, 'sale price');
+      if (ePrice <= 0) fail('ZERO_PRICE', 'This product has no sale price', { name: String(e.name).trim() });
+      lines.push({ kind: 'external', name: String(e.name).trim(), qty, unit_price: ePrice, unit_cost: parsePrice(e.cost ?? 0, 'purchase price') });
       continue;
     }
     const p = await tx.get('products', l.productId);
@@ -22,6 +24,7 @@ export async function buildCartLines(ctx, tx, inputLines, { blankPriceIsDefault 
     if (qty <= 0) fail('BAD_NUMBER', 'Quantity must be positive');
     const blank = l.price === undefined || (blankPriceIsDefault && l.price === '');
     const price = blank ? p.sale_price : parsePrice(l.price, 'price');
+    if (price <= 0) fail('ZERO_PRICE', 'This product has no sale price', { sku: p.sku, name: p.name });
     if (price !== p.sale_price) ctx.access.require('edit_sale_price');
     lines.push({ kind: 'product', product_id: p.id, name: p.name, qty, unit_price: price, unit_cost: p.purchase_price });
     stock.push({ line: lines.length - 1, product_id: p.id, reason: 'sale', qty_delta: -qty });

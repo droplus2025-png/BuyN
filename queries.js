@@ -16,20 +16,33 @@ const detailedSet = async (tx) => new Set((await tx.find('invoices', i => i.type
 // the whole-database self check (also used to verify a backup file before restoring it)
 export async function integrityProblems(tx) {
   const problems = [];
+  const group = (rows, key) => { const m = new Map(); for (const r of rows) { const k = r[key]; if (k == null) continue; (m.get(k) || m.set(k, []).get(k)).push(r); } return m; };
   const movs = await tx.all('stock_movements');
+  const qtyOf = new Map(); for (const m of movs) qtyOf.set(m.product_id, (qtyOf.get(m.product_id) || 0) + m.qty_delta);
   for (const p of await tx.all('products')) {
-    const s = movs.filter(m => m.product_id === p.id).reduce((a, m) => a + m.qty_delta, 0);
+    const s = qtyOf.get(p.id) || 0;
     if (s !== p.qty) problems.push({ check: 'product_qty', ref: p.sku, detail: `cache=${p.qty} ledger=${s}` });
   }
+  const invoices = await tx.all('invoices'), settles = await tx.all('invoice_settlements'), debts = await tx.all('debt_ledger');
+  const tgt = group(settles, 'target_invoice_id');
+  const DEBT = new Set(['sale', 'purchase', 'opening_debt_customer', 'opening_debt_supplier']);
   for (const [table, key] of [['customers', 'customer_id'], ['suppliers', 'supplier_id']]) {
+    const bal = new Map(); for (const d of debts) if (d[key]) bal.set(d[key], (bal.get(d[key]) || 0) + d.amount);
+    const open = new Map();                                      // what is still owed on the open invoices of each party (same rule as openInvoices)
+    for (const inv of invoices) {
+      if (!DEBT.has(inv.type) || !(inv.credit_amount > 0) || !inv[key]) continue;
+      const rem = inv.credit_amount - (tgt.get(inv.id) || []).reduce((a, x) => a + x.amount, 0);
+      if (rem > 0) open.set(inv[key], (open.get(inv[key]) || 0) + rem);
+    }
     for (const party of await tx.all(table)) {
-      const bal = await partyBalance(tx, key, party.id);
-      const open = (await openInvoices(tx, { [key]: party.id })).reduce((a, o) => a + o.remaining, 0);
-      if (bal !== open) problems.push({ check: `${table}_debt`, ref: party.phone_norm, detail: `ledger=${bal} open_invoices=${open}` });
+      const b = bal.get(party.id) || 0, o = open.get(party.id) || 0;
+      if (b !== o) problems.push({ check: `${table}_debt`, ref: party.phone_norm, detail: `ledger=${b} open_invoices=${o}` });
     }
   }
-  for (const i of await tx.all('invoices')) {
-    try { await checkInvoice(tx, i.id); } catch (e) { problems.push({ check: 'invoice', ref: i.invoice_no, detail: e.message }); }
+  const by = { invoice_lines: group(await tx.all('invoice_lines'), 'invoice_id'), cash_ledger: group(await tx.all('cash_ledger'), 'invoice_id'),
+    debt_ledger: group(debts, 'invoice_id'), stock_movements: group(movs, 'invoice_id'), src: group(settles, 'source_invoice_id'), tgt };
+  for (const i of invoices) {
+    try { await checkInvoice(tx, i.id, by); } catch (e) { problems.push({ check: 'invoice', ref: i.invoice_no, detail: e.message }); }
   }
   return problems;
 }

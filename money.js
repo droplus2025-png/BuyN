@@ -7,6 +7,11 @@ import { fail } from './errors.js';
 
 export const C = 100, Q = 1000, P = 10000;
 
+// digits typed on an Arabic keyboard (٠-٩ and ۰-۹) and the Arabic decimal / thousand marks -> plain 0-9 and "."
+export const latinDigits = (s) => String(s ?? '')
+  .replace(/[\u0660-\u0669]/g, (c) => String(c.charCodeAt(0) - 0x0660))
+  .replace(/[\u06F0-\u06F9]/g, (c) => String(c.charCodeAt(0) - 0x06F0));
+
 const roundDiv = (num, den) => Number((num + den / 2n) / den);   // BigInt, num >= 0
 
 // Parse "12", "12.5", "12,5" or a number into an integer with `decimals` digits.
@@ -18,7 +23,7 @@ export function parseScaled(value, decimals, label = 'value') {
     if (Math.abs(scaled - Math.round(scaled)) > 1e-6) fail('TOO_MANY_DECIMALS', `${label}: max ${decimals} decimals`, { value });
     s = value.toFixed(decimals);
   } else {
-    s = String(value ?? '').trim().replace(',', '.');
+    s = latinDigits(value).trim().replace(/[\u066B\u060C,]/, '.').replace(/[\u066C\s]/g, '');   // ٫ ، , = decimal mark; ٬ and spaces = thousands
   }
   if (!/^\d+(\.\d+)?$/.test(s)) fail('BAD_NUMBER', `${label} is not a valid positive number`, { value });
   const [int, frac = ''] = s.split('.');

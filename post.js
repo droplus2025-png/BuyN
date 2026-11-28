@@ -108,36 +108,38 @@ export async function allocateFifo(tx, party, amount) {
 }
 
 // ------------------------------------------------------------------ the safety net (mirrors fn_check_invoice)
-export async function checkInvoice(tx, id) {
+// `by` (optional): the rows of the whole database already grouped per invoice, so a full check stays fast with many invoices
+export async function checkInvoice(tx, id, by = null) {
   const i = await tx.get('invoices', id);
   if (!i) return;
   const no = i.invoice_no;
-  const lines = await tx.find('invoice_lines', l => l.invoice_id === id);
+  const rows = async (table, field, pred) => (by ? (by[table].get(id) || []) : await tx.find(table, pred));
+  const lines = await rows('invoice_lines', 'invoice_id', l => l.invoice_id === id);
   const sumLines = lines.reduce((a, l) => a + l.line_total, 0);
   if (GOODS_TYPES.has(i.type)) {
     if (!lines.length) fail('CHECK_FAILED', `Invoice ${no} has no lines`);
     if (sumLines !== i.total) fail('CHECK_FAILED', `Invoice ${no}: total ${i.total} <> sum of lines ${sumLines}`);
   } else if (lines.length) fail('CHECK_FAILED', `Invoice ${no} of this type cannot have lines`);
 
-  const cash = (await tx.find('cash_ledger', c => c.invoice_id === id)).reduce((a, c) => a + c.amount, 0);
+  const cash = (await rows('cash_ledger', 'invoice_id', c => c.invoice_id === id)).reduce((a, c) => a + c.amount, 0);
   if (cash !== i.cash_effect) fail('CHECK_FAILED', `Invoice ${no}: cash ledger ${cash} <> cash_effect ${i.cash_effect}`);
 
   const expDebt = (i.type === 'sale' || i.type === 'purchase' || i.type.startsWith('opening_debt')) ? i.credit_amount
     : (i.type === 'collect' || i.type === 'pay_supplier') ? -i.paid
     : (i.type === 'return_customer' || i.type === 'return_supplier') ? -i.credit_amount : 0;
-  const debts = await tx.find('debt_ledger', d => d.invoice_id === id);
+  const debts = await rows('debt_ledger', 'invoice_id', d => d.invoice_id === id);
   if (debts.reduce((a, d) => a + d.amount, 0) !== expDebt) fail('CHECK_FAILED', `Invoice ${no}: debt ledger does not match`);
   if (debts.some(d => (d.customer_id ?? null) !== i.customer_id || (d.supplier_id ?? null) !== i.supplier_id)) fail('CHECK_FAILED', `Invoice ${no}: debt entry on the wrong party`);
 
   const sign = STOCK_SIGN[i.type] || 0;
   const want = new Map(), got = new Map();
   for (const l of lines) if (l.kind === 'product') want.set(l.product_id, (want.get(l.product_id) || 0) + l.qty * sign);
-  for (const m of await tx.find('stock_movements', m => m.invoice_id === id)) got.set(m.product_id, (got.get(m.product_id) || 0) + m.qty_delta);
+  for (const m of await rows('stock_movements', 'invoice_id', m => m.invoice_id === id)) got.set(m.product_id, (got.get(m.product_id) || 0) + m.qty_delta);
   for (const k of new Set([...want.keys(), ...got.keys()])) if ((want.get(k) || 0) !== (got.get(k) || 0)) fail('CHECK_FAILED', `Invoice ${no}: stock movements do not match the lines`);
 
   const red = (i.type === 'collect' || i.type === 'pay_supplier') ? i.paid : (i.type.startsWith('return_')) ? i.credit_amount : 0;
-  const src = (await tx.find('invoice_settlements', s => s.source_invoice_id === id)).reduce((a, s) => a + s.amount, 0);
+  const src = (by ? (by.src.get(id) || []) : await tx.find('invoice_settlements', s => s.source_invoice_id === id)).reduce((a, s) => a + s.amount, 0);
   if (src > red) fail('CHECK_FAILED', `Invoice ${no}: settlements exceed the amount available`);
-  const tgt = (await tx.find('invoice_settlements', s => s.target_invoice_id === id)).reduce((a, s) => a + s.amount, 0);
+  const tgt = (by ? (by.tgt.get(id) || []) : await tx.find('invoice_settlements', s => s.target_invoice_id === id)).reduce((a, s) => a + s.amount, 0);
   if (tgt > (DEBT_TYPES.has(i.type) ? i.credit_amount : 0)) fail('CHECK_FAILED', `Invoice ${no}: settled more than its debt`);
 }

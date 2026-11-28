@@ -23,6 +23,15 @@ const ERR = {
   CHECK_FAILED: 'خطأ في توازن الأرقام، لم تُحفظ العملية',
   BAD_BACKUP: 'ملف النسخة الاحتياطية غير صالح', BACKUP_CORRUPT: 'الملف تالف أو معدَّل يدوياً، ورُفض حمايةً للبيانات',
   DETAIL_TOTAL_MISMATCH: 'يجب توزيع المبلغ كاملاً على المنتجات', ALREADY_DETAILED: 'تمت إضافة تفاصيل هذه الفاتورة من قبل', HAS_RETURNS: 'لا يمكن تفصيل فاتورة تم إرجاعها',
+  ZERO_PRICE: 'هذا المنتج بلا سعر بيع: حدّد سعره أولاً (المخزون ← تعديل)',
+  UNBALANCED: 'المدفوع والدين لا يساوي المجموع', LINE_NOT_FOUND: 'السطر لا ينتمي للفاتورة الأصلية', PARTY_NOT_FOUND: 'الزبون أو المورد غير موجود',
+  DESCRIPTION_REQUIRED: 'اكتب وصف المصروف', NO_SESSION: 'لا توجد حصة صندوق مفتوحة', SESSION_OPEN: 'حصة الصندوق مفتوحة من قبل',
+  NO_DEBT: 'لا يوجد دين على هذا الشخص', STOCK_HAS_HISTORY: 'توجد فواتير مرتبطة بالمنتجات: صفّر العمليات أولاً',
+  BAD_SKU: 'الرقم = رقم الصنف (0-9) ثم رقم المنتج (1، 2، 3…)', BAD_CATEGORY: 'الصنف رقم واحد من 0 إلى 9', BAD_REASON: 'سبب غير معروف',
+  BAD_MOVEMENT: 'حركة مخزون غير صالحة', BAD_TYPE: 'نوع عملية غير معروف', NOT_FOUND: 'العنصر غير موجود', DUPLICATE_ID: 'عملية مكررة، لم تُحفظ',
+  APPEND_ONLY: 'هذا السجل لا يمكن تعديله', INVOICE_FROZEN: 'الفاتورة مقفلة ولا تُعدَّل', SESSION_CLOSED: 'حصة الصندوق مغلقة',
+  NOT_EMPLOYEE: 'ليس حساب موظف', UNKNOWN_PERMISSION: 'صلاحية غير معروفة', UNKNOWN_SETTING: 'إعداد غير معروف',
+  BAD_CATEGORIES: 'الأصناف: أرقام 0-9 وأسماء حتى 30 حرفاً', BAD_LAYOUT: 'تخطيط الحروف غير صالح',
   BAD_PARENT: 'هذه الفاتورة لا تقبل هذه العملية', CANNOT_ALLOCATE: 'تعذّر توزيع المبلغ على هذه الكميات', INVOICE_NOT_FOUND: 'الفاتورة غير موجودة',
 };
 // refusals of the cloud sync (SyncError.kind)
