@@ -136,6 +136,7 @@ export function createMemoryStore(initial, { persist } = {}) {
         } catch (e) { Object.assign(state, snap); for (const t of snapT) idx[t] = null; throw e; }
       });
     },
+    counts() { return Object.fromEntries(TABLES.map((t) => [t, state[t].length])); },
     peek(t, id) { return state[t] ? clone(index(t).get(id)) : undefined; },
     onCommit(fn) { listeners.push(fn); },
     export() { return clone(state); },

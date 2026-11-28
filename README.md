@@ -14,7 +14,7 @@ ui-*.js                      الشاشات: ui-core.js (أدوات مشتركة
   post.js                    تسجيل الحركة الذرّي (فاتورة + مخزون + صندوق + ديون في عملية واحدة)
   products.js                المنتجات والأكواد (صنف 0-9 + رقم المنتج من 1)
   cart (أسطر السلة المشتركة) · sales · purchases · returns · payments · cash · parties · queries · settings · auth · admin · backup
-  sync*.js · sync_schema.sql · license_schema.sql · sync_speed.sql   المزامنة والتفعيل: جهاز رئيسي + أجهزة مرتبطة، تفعيل برقم الهاتف. ثلاثة ملفات SQL تُنفَّذ بالترتيب في Supabase
+  sync*.js · sync_schema.sql · license_schema.sql · sync_speed.sql · sync_repair.sql   المزامنة والتفعيل: جهاز رئيسي + أجهزة مرتبطة، تفعيل برقم الهاتف. أربعة ملفات SQL تُنفَّذ بالترتيب في Supabase (الأخير يضمن أن الأجهزة المرتبطة تطابق الرئيسي دائماً)
 *.test.js                    الاختبارات (node --test)
 style.css · pc.css           الأنماط: الأساس · شاشة الحاسوب والهوية
 logo.png · icon-*.png        الشعار والأيقونات

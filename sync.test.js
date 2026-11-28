@@ -10,7 +10,7 @@ const refuse = (kind, extra = {}) => Object.assign(new Error(kind), { kind, ...e
 const PHONE = '0663152474', CODE = 'ACT-CODE-1';
 const norm = (p) => { const d = String(p).replace(/\D/g, ''); return d.startsWith('00') ? d.slice(2) : d.startsWith('0') && d.length === 10 ? `212${d.slice(1)}` : d; };
 function fakeServer() {
-  const calls = { n: 0 }; const rows = new Map(), devs = new Map(), codes = new Map(), lics = new Map(); let seq = 0, tok = 0, shops = 0, wrong = 0;
+  const calls = { n: 0 }; const rows = new Map(), devs = new Map(), codes = new Map(), lics = new Map(); let seq = 0, tok = 0, shops = 0, wrong = 0; const epochs = new Map(), stall = new Set();
   lics.set(norm(PHONE), { code: CODE, status: 'active', max: 3, shop: null });
   const lease = () => new Date(clock + 14 * 864e5).toISOString();                 // the server shares the test clock
   const licenseOf = (shop) => [...lics.values()].find((l) => l.shop === shop);
@@ -27,7 +27,8 @@ function fakeServer() {
   };
   const main = (id, token) => { const d = auth(id, token); if (d.role !== 'main') throw refuse('notmain'); return d; };
   return {
-    rows, devs, lics, calls,
+    rows, devs, lics, calls, epochs, stall,
+    release() { for (const r of rows.values()) r.hidden = false; },        // a stalled push finally commits (rows of devices in `stall` stay invisible until then)
     transport: {
       async activate(phone, code, id, name) {
         if (wrong >= 5) throw refuse('throttled');
@@ -63,16 +64,29 @@ function fakeServer() {
         return { ok: true };
       },
       async ackRevoked(id, token) { const d = auth(id, token, true); d.wiped = true; return { ok: true }; },
-      async exchange(id, token, list, since, limit) {
+      async exchange(id, token, list, since, limit, epoch = null) {
         const d = auth(id, token);
         calls.n++;
+        const ep = epochs.get(d.shop) || 1;
+        if (epoch != null && epoch !== ep) return { reset: true, epoch: ep, rows: [], last: 0, lease_until: d.lease };       // sync_repair.sql: an older epoch is not accepted
         for (const r of list) {
-          const k = `${d.shop}|${r.t}|${r.k}`, cur = rows.get(k);
-          if (!cur) rows.set(k, { ...r, shop: d.shop, dev: id, seq: ++seq });
-          else if (!APPEND.has(r.t) && Date.parse(cur.u) <= Date.parse(r.u)) rows.set(k, { ...r, shop: d.shop, dev: id, seq: ++seq });
+          const k = `${d.shop}|${r.t}|${r.k}`, cur = rows.get(k), hidden = stall.has(id);
+          if (!cur) rows.set(k, { ...r, shop: d.shop, dev: id, seq: ++seq, hidden });
+          else if (!APPEND.has(r.t) && Date.parse(cur.u) <= Date.parse(r.u)) rows.set(k, { ...r, shop: d.shop, dev: id, seq: ++seq, hidden });
         }
-        const out = [...rows.values()].filter((r) => r.shop === d.shop && r.seq > since && r.dev !== id).sort((a, b) => a.seq - b.seq).slice(0, limit);
-        return { rows: out.map((r) => ({ t: r.t, k: r.k, d: r.d, u: r.u, s: r.seq })), last: out.length ? out[out.length - 1].seq : since, lease_until: d.lease };
+        const out = [...rows.values()].filter((r) => r.shop === d.shop && !r.hidden && r.seq > since && r.dev !== id).sort((a, b) => a.seq - b.seq).slice(0, limit);
+        return { rows: out.map((r) => ({ t: r.t, k: r.k, d: r.d, u: r.u, s: r.seq })), last: out.length ? out[out.length - 1].seq : since, lease_until: d.lease, epoch: ep };
+      },
+      async counts(id, token) {
+        const d = auth(id, token), counts = {};
+        for (const r of rows.values()) if (r.shop === d.shop && !r.hidden) counts[r.t] = (counts[r.t] || 0) + 1;
+        return { counts, epoch: epochs.get(d.shop) || 1 };
+      },
+      async reset(id, token) {
+        const d = main(id, token);
+        for (const [k, r] of [...rows]) if (r.shop === d.shop) rows.delete(k);
+        epochs.set(d.shop, (epochs.get(d.shop) || 1) + 1);
+        return { epoch: epochs.get(d.shop) };
       },
     },
   };
@@ -344,4 +358,134 @@ test('sync: a large backlog goes out in pages of 500 and converges', async () =>
   assert.equal(B.store.export().products.length, 40);
   assert.equal(B.store.export().stock_movements.length, 40);
   assert.equal(await A.disk.meta.outboxCount(), 0);
+});
+
+// ---- the shop of the user: the main device holds a history, a link-up happens at the same moment as other work
+async function history(eng, n) {
+  const p = await eng.products.create({ name: `Vis${n}`, purchasePrice: '1', salePrice: '2', qty: '1000' });
+  for (let i = 0; i < n; i++) await eng.sale({ lines: [{ productId: p.id, qty: '1', price: '2' }], paid: '2' });
+  return p;
+}
+const empEngine = async (D) => createEngine({ store: D.store, session: await D.auth.login('1234'), deviceId: D.id, now: D.now });
+
+test('sync: old history is never skipped, even when a third device read past it (the phone with no invoices)', async () => {
+  const srv = fakeServer();
+  const M = device('M'), L1 = device('L1'), L2 = device('L2');
+  const m = await owner(M);
+  await history(m, 60);                                              // the history made before any link-up
+  const l1 = await owner(L1);
+  await history(l1, 40);                                             // another device with its own work: far more than the 100-row overlap
+  srv.stall.add('M');                                                // M's upload is still "in flight" (not committed) ...
+  await attach(M, srv).activate(PHONE, CODE, 'main');
+  const code1 = await M.sync.pairingCode();
+  await attach(L1, srv).join(code1.code, 'first');                   // ... while the other device links and sends its rows: they get HIGHER numbers
+  srv.stall.clear();
+  const code2 = await M.sync.pairingCode();
+  await attach(L2, srv).join(code2.code, 'second');                  // a third device reads: it only sees what is committed, and moves its cursor past it
+  srv.release();                                                     // M's history commits LATER than rows that came after it
+  await L2.sync.syncNow();
+  assert.equal(L2.store.export().invoices.length, 40, 'the cursor alone never brings the history back');
+
+  // the repair: a device compares its row counts with the shop's and reads the whole shop again when it holds less
+  clock += 6 * 60 * 1000;
+  await L2.sync.syncNow(); await L1.sync.syncNow(); await M.sync.syncNow(); await L2.sync.syncNow();
+  const n = M.store.export().invoices.length;
+  assert.equal(n, 100);
+  for (const D of [L1, L2]) {
+    const got = D.store.export();
+    assert.equal(got.invoices.length, 100);
+    assert.equal(got.stock_movements.length, M.store.export().stock_movements.length);
+  }
+});
+
+test('sync: rows lost from the outbox are sent again (the main device holds more than the shop)', async () => {
+  const srv = fakeServer();
+  const M = device('M'), L = device('L');
+  const m = await owner(M);
+  await link(srv, M, L);
+  await history(m, 5);
+  M.disk.ob.clear();                                                 // the outbox of the main device was lost: its sales never left it
+  await M.sync.syncNow(); await L.sync.syncNow();
+  assert.equal(L.store.export().invoices.length, 0);
+  clock += 6 * 60 * 1000;
+  await M.sync.syncNow(); await L.sync.syncNow(); await M.sync.syncNow(); await L.sync.syncNow();
+  assert.equal(L.store.export().invoices.length, 5);
+});
+
+test('sync: a device that was linked before the repair existed sends everything and reads the shop once', async () => {
+  const srv = fakeServer();
+  const M = device('M'), L = device('L');
+  const m = await owner(M);
+  await link(srv, M, L);
+  await history(m, 4);
+  M.disk.ob.clear();                                                 // sales that never reached the shop
+  await M.disk.meta.set('repair', 0);                                // this device never ran the repair: a first start of the new program
+  await M.sync.syncNow(); await L.sync.syncNow();
+  assert.equal(L.store.export().invoices.length, 4);                 // no waiting time: the one-time repair does not depend on the server counts
+  assert.equal(await M.disk.meta.get('repair', 0), 1);
+});
+
+test('sync: the main device restores / empties the operations and every linked device follows (no old invoice stays on a phone)', async () => {
+  const srv = fakeServer();
+  const M = device('M'), L = device('L');
+  const m = await owner(M);
+  await history(m, 6);
+  await link(srv, M, L);
+  assert.equal(L.store.export().invoices.length, 6);
+  let reloaded = 0; L.sync = createSync({ store: L.store, meta: L.disk.meta, transport: srv.transport, deviceId: 'L', now: L.now, auth: L.syncAuth, onReset: () => reloaded++ });
+
+  await m.admin.resetOperations();                                   // the owner empties the operations on the main device
+  await M.sync.markReset(); await M.sync.syncNow();
+  assert.equal(srv.epochs.get('shop1'), 2);
+  await L.sync.syncNow();
+  assert.equal(L.store.export().invoices.length, 0);
+  assert.equal(L.store.export().products.length, 1);                 // the products stay, as on the main device
+  assert.equal(reloaded, 1);                                         // the program reloads itself on that device
+
+  // a sale made on the phone while it was offline, before it met the new epoch, is not accepted into the new shop
+  const l = await empEngine(L);
+  const p = (await l.products.search('', 5))[0];
+  await l.sale({ lines: [{ productId: p.id, qty: '1', price: '2' }], paid: '2' });
+  await L.sync.syncNow(); await M.sync.syncNow();
+  assert.equal(M.store.export().invoices.length, 1);                 // a NEW sale after the reset syncs normally
+  assert.equal(L.store.export().invoices.length, 1);
+
+  // a backup restored on the main device: same thing
+  const file = await m.admin.backup();
+  await history(m, 2);
+  await M.sync.syncNow(); await L.sync.syncNow();
+  assert.equal(L.store.export().invoices.length, 3);
+  await m.admin.restoreBackup(file);
+  await M.sync.markReset(); await M.sync.syncNow();
+  await L.sync.syncNow();
+  assert.equal(L.store.export().invoices.length, 1);
+  assert.equal(srv.epochs.get('shop1'), 3);
+  assert.equal(M.store.export().invoices.length, L.store.export().invoices.length);
+});
+
+test('sync: a device in an older epoch is told to start again and what it sent is not accepted', async () => {
+  const srv = fakeServer();
+  const M = device('M'), L = device('L');
+  const m = await owner(M);
+  await history(m, 3);
+  await link(srv, M, L);
+  const l = await empEngine(L);
+  const p = (await l.products.search('', 5))[0];
+  await m.admin.resetOperations(); await M.sync.markReset(); await M.sync.syncNow();         // L is offline during the reset ...
+  await l.sale({ lines: [{ productId: p.id, qty: '1', price: '2' }], paid: '2' });   // ... and sells
+  const before = [...srv.rows.values()].filter((r) => r.t === 'invoices').length;
+  await L.sync.syncNow();                                            // it meets the new epoch: its offline sale belongs to the old shop
+  assert.equal([...srv.rows.values()].filter((r) => r.t === 'invoices').length, before);
+  assert.equal(L.store.export().invoices.length, 0);
+});
+
+test('sync: a main device whose server was not updated keeps working and says the reset is blocked', async () => {
+  const srv = fakeServer();
+  const M = device('M'), L = device('L');
+  const m = await owner(M);
+  await link(srv, M, L);
+  srv.transport.reset = async () => { throw Object.assign(new Error('404'), { kind: 'server' }); };
+  await M.sync.markReset(); await M.sync.syncNow();
+  assert.equal(M.sync.status.resetBlocked, true);
+  assert.equal(M.sync.status.state, 'idle');                         // normal sync is not blocked
 });

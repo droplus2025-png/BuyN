@@ -37,7 +37,10 @@ export function supabaseTransport({ url, key, fetchFn = (...a) => fetch(...a) })
     revoke: (device, token, target, mode) => call('revoke_device', { p_device: device, p_token: token, p_target: target, p_mode: mode }),
     ackRevoked: (device, token) => call('ack_revoked', { p_device: device, p_token: token }),
     // ONE request: what this device has to send, and what the other devices did since `since` (comes back in the same answer)
-    exchange: (device, token, rows, since, limit) => call('sync_exchange', { p_device: device, p_token: token, p_rows: rows, p_since: since, p_limit: limit }),
+    // `epoch` is sent only once the server told it (an older server never does): a device of an older epoch is told to start again
+    exchange: (device, token, rows, since, limit, epoch = null) => call('sync_exchange', { p_device: device, p_token: token, p_rows: rows, p_since: since, p_limit: limit, ...(epoch == null ? {} : { p_epoch: epoch }) }),
+    counts: (device, token) => call('sync_counts', { p_device: device, p_token: token }),
+    reset: (device, token) => call('sync_reset', { p_device: device, p_token: token }),
   };
 }
 
@@ -50,12 +53,14 @@ export const deviceAuth = {
 };
 
 const PAGE = 500;             // rows per request, both ways (the server accepts 500 at most)
+const REPAIR = 1;             // bump to make every device send everything and read the whole shop once (repair after a fix)
+const RECONCILE_EVERY = 5 * 60 * 1000, HEAL_EVERY = 30 * 60 * 1000;
 const OVERLAP = 100;          // re-read the last rows each time: a row committed late on the server is never missed (merging twice is harmless)
 
-export function createSync({ store, meta, transport, deviceId, auth = deviceAuth, onRevoked, onLicense, now = () => new Date(), intervalMs = 15000 }) {
+export function createSync({ store, meta, transport, deviceId, auth = deviceAuth, onRevoked, onLicense, onReset, now = () => new Date(), intervalMs = 15000 }) {
   let st = { state: 'off', pending: 0, last: null, error: null };
   const listeners = [];
-  let running = null, again = false, timer = null, debounce = null, started = false;
+  let running = null, again = false, timer = null, debounce = null, started = false, countsMissing = false, startedOver = false;
   const set = (patch) => { st = { ...st, ...patch }; listeners.forEach((l) => l(st)); };
   const refreshPending = async () => { st.pending = await meta.outboxCount(); };
   // the lease: the server renews it at every contact (14 days). Offline past that date the program locks.
@@ -81,8 +86,10 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
         if (row) rows.push({ t: e.table, k: String(e.pk), d: row, u: e.u });
       }
       const cursor = await meta.get('cursor', 0);
-      const res = await transport.exchange(deviceId, token, rows, Math.max(0, cursor - OVERLAP), PAGE);
+      const res = await transport.exchange(deviceId, token, rows, Math.max(0, cursor - OVERLAP), PAGE, await meta.get('epoch', null));
       touchLease(res);
+      if (res.reset) { await startOver(res.epoch); continue; }      // the main device replaced the shop's data: our rows were NOT accepted
+      if (res.epoch != null && (await meta.get('epoch', null)) == null) await meta.set('epoch', res.epoch);
       if (ob.length) await meta.ack(ob);                       // sent: forget them (unless changed again meanwhile)
       const got = res.rows || [];
       if (got.length) {
@@ -94,6 +101,35 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
       if (ob.length < PAGE && got.length < PAGE) break;        // nothing more on either side
     }
     return corrections;
+  }
+  // the main device restored a backup / emptied the operations: this device erases its copy and reads the shop again (it never decides, it follows)
+  async function startOver(epoch) {
+    await store.replaceAll({});
+    await meta.set('cursor', 0); await meta.set('epoch', epoch); await meta.set('reconciled_at', 0);
+    startedOver = true; await refreshPending();
+  }
+  // does this device hold what the shop holds? Counts per table are compared (only when nothing is waiting to be sent).
+  // fewer rows here -> read the whole shop again; more rows here -> send everything again. Both are safe to repeat.
+  async function reconcile(token) {
+    if (countsMissing) return;
+    const t0 = now().getTime();
+    if (t0 - (await meta.get('reconciled_at', 0)) < RECONCILE_EVERY) return;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (await meta.outboxCount()) return;
+      let srv;
+      try { srv = await transport.counts(deviceId, token); }
+      catch (e) { if (e.kind === 'server') { countsMissing = true; return; } throw e; }       // the server was not updated with sync_repair.sql: nothing to compare
+      const mine = store.counts(), less = [], more = [];
+      for (const table of Object.keys(mine)) { const s = srv.counts?.[table] || 0; if (mine[table] < s) less.push(table); else if (mine[table] > s) more.push(table); }
+      if (!less.length && !more.length) { set({ mismatch: [] }); await meta.set('reconciled_at', t0); return; }
+      if (attempt === 0) { await cycle(token); continue; }                                    // another device may just have sent something: look again first
+      set({ mismatch: [...less, ...more] });
+      if (t0 - (await meta.get('healed_at', 0)) < HEAL_EVERY) return;                       // already repaired lately: do not loop
+      await meta.set('healed_at', t0); await meta.set('reconciled_at', t0);
+      if (more.length) await queueAll();
+      if (less.length) await meta.set('cursor', 0);
+      await cycle(token);
+    }
   }
   async function cycle(token) {
     for (let round = 0; round < 5; round++) if (!(await exchangeAll(token))) break;      // our own corrections must go out too
@@ -107,9 +143,19 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
     running = (async () => {
       set({ state: 'syncing', error: null });
       try {
+        if (a.role === 'main' && (await meta.get('pending_reset', false))) {            // the shop takes the state of THIS (main) device
+          try {
+            const r = await transport.reset(deviceId, a.token);
+            await meta.set('epoch', r.epoch); await meta.set('cursor', 0); await queueAll(); await meta.set('pending_reset', false);
+            set({ resetBlocked: false });
+          } catch (e) { if (e.kind === 'network') throw e; set({ resetBlocked: true }); }     // server not updated (sync_repair.sql): the other devices cannot follow yet
+        }
+        if ((await meta.get('repair', 0)) < REPAIR) { await queueAll(); await meta.set('cursor', 0); await meta.set('repair', REPAIR); }
         await cycle(a.token);
+        await reconcile(a.token);
         await refreshPending();
         set({ state: 'idle', last: now().toISOString() });
+        if (startedOver) { startedOver = false; onReset?.(); }
       } catch (e) {
         await refreshPending().catch(() => {});
         if (e.kind === 'revoked') { set({ state: 'revoked', error: e.mode }); onRevoked?.(e.mode); }     // the owner disconnected this device
@@ -148,7 +194,7 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
   async function accept(r, upload) {
     auth.set({ token: r.token, role: r.role, shop_id: r.shop_id, lease_until: r.lease_until, seen: now().getTime() });
     await meta.set('linked', true);
-    await meta.set('cursor', 0);
+    await meta.set('cursor', 0); await meta.set('epoch', null); await meta.set('reconciled_at', 0); await meta.set('repair', REPAIR);
     if (upload) await queueAll();
     return syncNow();
   }
@@ -194,6 +240,13 @@ export function createSync({ store, meta, transport, deviceId, auth = deviceAuth
     revoke: (target, mode) => transport.revoke(deviceId, need().token, target, mode),
     // ---- a disconnected device: tell the server its data was erased (false when offline: the owner keeps seeing "not erased yet")
     async confirmWipe() { try { await transport.ackRevoked(deviceId, need().token); return true; } catch { return false; } },
+    // MAIN device: after a restore or a reset of the operations, the whole shop must become what this device holds now
+    async markReset() {
+      if (auth.get()?.role !== 'main') throw new SyncError('notmain', 'NOT_MAIN');
+      await meta.set('pending_reset', true);                  // kept on disk: it also works when offline or when the program restarts
+      syncNow();
+      return true;
+    },
     async unlink() { auth.clear(); await meta.set('linked', false); set({ state: 'off', error: null }); },
   };
 }

@@ -133,7 +133,7 @@ async function boot() {
   app.persist = persist;
   app.store = createMemoryStore(Object.keys(state).length ? state : undefined, { persist: persist.persist });
   app.auth = createAuth({ store: app.store });
-  app.sync = createSync({ store: app.store, meta: persist.meta, transport: supabaseTransport(SUPABASE), deviceId, onRevoked: (mode) => app.onRevoked(mode), onLicense: (kind) => app.onLicense(kind) });
+  app.sync = createSync({ store: app.store, meta: persist.meta, transport: supabaseTransport(SUPABASE), deviceId, onRevoked: (mode) => app.onRevoked(mode), onLicense: (kind) => app.onLicense(kind), onReset: () => location.reload() });
   app.sync.onStatus(paintSync);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkUpdate(); });

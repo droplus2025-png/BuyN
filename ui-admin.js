@@ -83,6 +83,7 @@ export async function renderAdmin(app) {
         <div class="kv"><span>الحالة</span><b id="syState">…</b></div>
         <div class="kv"><span>بانتظار الإرسال</span><b id="syPend">…</b></div>
         <div class="kv"><span>آخر مزامنة</span><b id="syLast">—</b></div>
+        <div class="err" id="syWarn" style="margin-top:6px"></div>
         <div class="kv"><span>التفعيل صالح حتى (دون اتصال)</span><b dir="ltr">${app.sync.leaseUntil ? fmtWhen(app.sync.leaseUntil) : '—'}</b></div>
         <button class="btn gold" id="syNow" style="width:100%;margin-top:8px">مزامنة الآن</button>
         ${role === 'main' ? '<button class="btn" id="syCode" style="width:100%;margin-top:8px">+ رمز ربط جهاز جديد</button><button class="btn" id="syDevs" style="width:100%;margin-top:8px">الأجهزة المرتبطة</button>' : ''}
@@ -157,7 +158,7 @@ export async function renderAdmin(app) {
           <div class="kv"><span>الزبناء / الموردون</span><b>${v.counts.customers} / ${v.counts.suppliers}</b></div>
           <div class="err">⚠ سيُستبدل كل ما في هذا الجهاز بمحتوى هذه النسخة، وستدخل بكلمات مرورها.</div>`,
         buttons: [{ label: 'إلغاء' }, { label: 'استعادة', cls: 'gold', onClick: async () => {
-          try { await eng.admin.restoreBackup(file); toast('تمت الاستعادة، سيُعاد تشغيل البرنامج'); setTimeout(() => location.reload(), 900); }
+          try { await eng.admin.restoreBackup(file); await app.sync.markReset().catch(() => {}); toast('تمت الاستعادة، سيُعاد تشغيل البرنامج'); setTimeout(() => location.reload(), 900); }
           catch (e) { toast(errText(e), true, 3500); }
         } }] });
     });
@@ -186,6 +187,7 @@ export async function renderAdmin(app) {
     const paintSy = (s) => {
       if (!$('#syState')) return;
       $('#syState').textContent = SY[s.state] + (s.error && s.state === 'error' ? ` (${s.error.slice(0, 40)})` : '');
+      $('#syWarn').textContent = s.resetBlocked ? 'تنبيه: خادم المزامنة لم يُحدَّث، فلن تتبع الأجهزة المرتبطة التصفير أو الاستعادة. شغّل ملف sync_repair.sql في Supabase.' : '';
       $('#syPend').textContent = s.pending; $('#syLast').textContent = s.last ? new Date(s.last).toLocaleTimeString('ar-MA-u-nu-latn', { hour: '2-digit', minute: '2-digit' }) : '—';
     };
     app.syncHook = paintSy; paintSy(app.sync.status);
@@ -235,7 +237,7 @@ export async function renderAdmin(app) {
         if (m.querySelector('#w').value.trim() !== 'تصفير') { m.querySelector('#err').textContent = 'اكتب الكلمة كما هي'; return false; }
         try {
           const f = await makeFile(); download(f, `avant-reset-operations-${f.name}`);                // safety copy first
-          const r = await eng.admin.resetOperations(); toast(`تم التصفير · ${r.products_kept} منتج محفوظ`); draw();
+          const r = await eng.admin.resetOperations(); await app.sync.markReset().catch(() => {}); toast(`تم التصفير · ${r.products_kept} منتج محفوظ`); draw();
         } catch (e) { m.querySelector('#err').textContent = errText(e); return false; }
       } }],
       onOpen: (m) => m.querySelector('#w').focus() });
