@@ -55,19 +55,19 @@ const LICENSE_MSG = { suspended: 'الترخيص موقوف. تواصل مع ا�
   lease: 'يلزم الاتصال بالإنترنت لتجديد التفعيل. بيانات المحل محفوظة، وسيفتح البرنامج تلقائياً عند الاتصال.' };
 export function renderLocked(app, { mode, kind }) {
   document.body.classList.remove('pcmode'); document.getElementById('app').innerHTML = '';
-  const wipe = mode === 'wipe', lic = mode === 'license';
+  const wipe = mode === 'wipe', lic = mode === 'license', linked = app.sync.role === 'linked';   // a linked (employee) device never leaves the shop by itself
   mount(`<div class="screen"><div class="center">
     <img src="logo.png" alt=""><h2 style="margin:0;color:var(--gold)">${lic ? 'البرنامج مقفل' : 'تم فصل هذا الجهاز عن المحل'}</h2>
     <div class="muted" style="text-align:center;max-width:340px">${lic ? LICENSE_MSG[kind] || LICENSE_MSG.suspended : wipe ? 'مُسحت بيانات المحل من هذا الجهاز.' : 'البرنامج مقفل على هذا الجهاز وبياناته محفوظة. لاستعماله من جديد اطلب من الجهاز الرئيسي رمز ربط.'}</div>
     ${wipe || lic ? '' : `<input id="lc" class="inp" inputmode="numeric" placeholder="رمز الربط (8 أرقام)" autocomplete="off" style="max-width:300px;direction:ltr;text-align:center">`}
     <div class="err" id="err"></div>
-    <button class="btn gold big" id="go" style="min-width:220px">${lic ? (kind === 'nolicense' ? 'تفعيل برقم الهاتف' : 'إعادة المحاولة') : wipe ? 'البدء من جديد' : 'ربط الجهاز'}</button>
-    ${lic && kind !== 'nolicense' ? '<button class="btn" id="other" style="min-width:220px">تفعيل برقم هاتف آخر</button>' : ''}
+    <button class="btn gold big" id="go" style="min-width:220px">${lic ? (kind === 'nolicense' && !linked ? 'تفعيل برقم الهاتف' : 'إعادة المحاولة') : wipe ? 'البدء من جديد' : 'ربط الجهاز'}</button>
+    ${lic && kind !== 'nolicense' && !linked ? '<button class="btn" id="other" style="min-width:220px">تفعيل برقم هاتف آخر</button>' : ''}
   </div></div>`);
   $('#other')?.addEventListener('click', () => app.resetActivation());
   $('#go').onclick = async () => {
     if (wipe) return location.reload();
-    if (kind === 'nolicense') return app.resetActivation();
+    if (kind === 'nolicense' && !linked) return app.resetActivation();
     $('#go').disabled = true;
     try {
       if (lic) { await app.sync.syncNow(); $('#err').textContent = app.sync.status.state === 'idle' ? '' : (app.sync.status.state === 'offline' ? syncErrText({ kind: 'network' }) : 'لم يُجدَّد الترخيص بعد'); }

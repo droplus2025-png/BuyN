@@ -1,5 +1,6 @@
 // Entry point.   const engine = createEngine({ store, session, deviceId })
 // `session` comes from auth.login(code): the code decides the role, the role decides what is possible.
+import { fail } from './errors.js';
 import { productsApi } from './products.js';
 import { salesApi } from './sales.js';
 import { purchasesApi } from './purchases.js';
@@ -39,8 +40,10 @@ function guardDoubleTap(engine) {
   return engine;
 }
 
-export function createEngine({ store, session, deviceId = null, now = () => new Date(), ids = () => globalThis.crypto.randomUUID() }) {
-  const ctx = { store, access: session.access, userId: session.userId, deviceId, now, ids };
+// isMain: is this the MAIN device of the shop? (the app answers from the sync role). Settings and administration are for it alone.
+export function createEngine({ store, session, deviceId = null, isMain = () => true, now = () => new Date(), ids = () => globalThis.crypto.randomUUID() }) {
+  const requireMain = () => { if (!isMain()) fail('NOT_MAIN_DEVICE', 'Settings and administration are for the main device only'); };
+  const ctx = { store, access: session.access, userId: session.userId, deviceId, now, ids, requireMain };
   return guardDoubleTap({
     permissions: session.permissions,                         // hide what is not allowed
     products: productsApi(ctx),

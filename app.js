@@ -28,7 +28,10 @@ document.addEventListener('pointerdown', (e) => { const b = e.target.closest('bu
 
 const deviceId = localStorage.getItem('buyn_device_id') || (() => { const id = crypto.randomUUID(); localStorage.setItem('buyn_device_id', id); return id; })();
 
+// the MAIN device is the only one that enters settings and administration (backup, restore, resets, devices, invoice template)
+app.isMain = () => app.sync?.role === 'main';
 app.go = async (name, params = {}) => {
+  if (name === 'admin' && !app.isMain()) { toast('الإعدادات والإدارة للجهاز الرئيسي فقط', true, 3500); name = 'home'; params = {}; }
   app.screen = name; app.syncHook = null;
   const wide = !!app.session && name !== 'login' && name !== 'setup' && matchMedia('(min-width:900px)').matches;
   if (!wide) document.body.classList.remove('pcmode');
@@ -41,7 +44,7 @@ app.go = async (name, params = {}) => {
 
 app.startSession = async (session) => {
   app.session = session;
-  app.engine = createEngine({ store: app.store, session, deviceId });
+  app.engine = createEngine({ store: app.store, session, deviceId, isMain: () => app.isMain() });
   await app.engine.settings.init();
   app.cfg = await app.engine.settings.get();
   app.go('home');

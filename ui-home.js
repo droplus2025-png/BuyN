@@ -20,7 +20,7 @@ export function renderHome(app) {
   const d = now.toLocaleDateString('ar-MA-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' });
   const year = now.getFullYear();
   const tile = ([id, ar, en, ico]) => {
-    if (id === 'admin' && !owner) return '';
+    if (id === 'admin' && (!owner || !app.isMain())) return '';          // settings & administration: main device only
     const off = id === 'invoices' ? !(p.view_invoices || p.quick_sale) && !owner : PERM[id] && !p[PERM[id]] && !owner;
     return `<button class="tile ${id === 'admin' ? 'admin' : ''}" data-id="${id}" ${off ? 'disabled' : ''}><div class="ico">${ico}</div><div><div class="t1">${ar}</div><div class="t2">${en}</div></div></button>`;
   };
@@ -43,7 +43,7 @@ export function renderHome(app) {
   }));
   $('#out').onclick = () => app.exit();
   // owner: reminder when no recent backup exists (the data lives on this device only)
-  if (owner) app.engine.admin.lastBackupAt().then((t) => {
+  if (owner && app.isMain()) app.engine.admin.lastBackupAt().then((t) => {
     if (t && Date.now() - new Date(t) < 3 * 864e5) return;
     document.querySelector('.body')?.insertAdjacentHTML('afterbegin', `<button class="card" id="bk" style="border-color:var(--amber);color:var(--amber);font-weight:700;text-align:center">⚠ ${t ? 'مرّت أكثر من 3 أيام على آخر نسخة احتياطية' : 'لم تُحفظ أي نسخة احتياطية بعد'} — اضغط للحفظ</button>`);
     document.querySelector('#bk')?.addEventListener('click', () => app.go('admin'));

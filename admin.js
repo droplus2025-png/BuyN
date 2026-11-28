@@ -9,7 +9,7 @@ export function adminApi(ctx) {
   return {
     // owner: the whole database as one file (the date of the last backup is remembered)
     async backup() {
-      ctx.access.requireOwner();
+      ctx.access.requireOwner(); ctx.requireMain();
       const file = buildBackup(store, { device_id: ctx.deviceId });
       await store.transaction(async (tx) => {
         const cur = await tx.get('settings', 'last_backup_at'), row = { value: file.exported_at, updated_at: ctx.now().toISOString() };
@@ -18,10 +18,10 @@ export function adminApi(ctx) {
       return file;
     },
     async lastBackupAt() { return store.transaction(async (tx) => (await tx.get('settings', 'last_backup_at'))?.value ?? null); },
-    verifyBackup: (file) => { ctx.access.requireOwner(); return verifyBackup(file); },
+    verifyBackup: (file) => { ctx.access.requireOwner(); ctx.requireMain(); return verifyBackup(file); },
     // replaces EVERYTHING by the content of a verified backup. The caller must log in again afterwards.
     async restoreBackup(file) {
-      ctx.access.requireOwner();
+      ctx.access.requireOwner(); ctx.requireMain();
       const v = await verifyBackup(file);
       if (!v.ok) fail('BACKUP_CORRUPT', 'The backup file does not add up and was refused', { problems: v.problems.slice(0, 5) });
       await store.replaceAll(file.state);
@@ -30,7 +30,7 @@ export function adminApi(ctx) {
     // owner: hides the whole stock (every product is deleted the soft way): numbers stay reserved, nothing is destroyed,
     // and the products come back with their quantities and prices through products.restore / restoreAll.
     async resetStock() {
-      ctx.access.requireOwner();
+      ctx.access.requireOwner(); ctx.requireMain();
       return store.transaction(async (tx) => {
         const list = await tx.find('products', (p) => !p.deleted_at);
         const t = ctx.now().toISOString();
@@ -40,7 +40,7 @@ export function adminApi(ctx) {
       });
     },
     async resetOperations() {
-      ctx.access.requireOwner();
+      ctx.access.requireOwner(); ctx.requireMain();
       return store.transaction(async (tx) => {
         const keep = (await tx.find('products', p => p.qty > 0 && !p.deleted_at)).map(p => ({ id: p.id, qty: p.qty, cost: p.purchase_price }));
         for (const t of ['invoice_settlements', 'debt_ledger', 'cash_ledger', 'stock_movements', 'price_history',

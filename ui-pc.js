@@ -30,7 +30,7 @@ export function ensureShell(app, active) {
     const d = new Date().toLocaleDateString('ar-MA-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     $('#app').innerHTML = `<div class="pc"><div class="pc-top"><div class="brand"><img src="logo.png" alt=""><b></b></div>
       <button class="tb salebtn" id="kbm">123⇄abc</button><button class="tb salebtn" id="sysk" title="لوحة مفاتيح النظام">⌨</button><div class="note" id="note"></div><div class="date">${esc(d)}</div></div>
-      <div class="pc-body"><nav class="pc-menu">${MENU.map(([id, t]) => `<button data-id="${id}">${t}</button>`).join('')}</nav><div id="work"></div></div></div>`;
+      <div class="pc-body"><nav class="pc-menu">${MENU.filter(([id]) => id !== 'admin' || app.isMain()).map(([id, t]) => `<button data-id="${id}">${t}</button>`).join('')}</nav><div id="work"></div></div></div>`;
     document.querySelectorAll('.pc-menu button').forEach((b) => b.addEventListener('click', () => (b.dataset.id === 'home' ? app.go('home') : app.go(...GO[b.dataset.id]))));
   }
   $('.brand b').textContent = app.cfg?.store_name || '';

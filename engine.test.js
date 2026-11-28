@@ -751,3 +751,18 @@ test('field safety: Arabic digits, no sale at price 0, double tap, names with ex
   assert.equal(inv.filter((i) => i.type === 'sale').length, 1);
   assert.deepEqual(await w.owner.reports.integrityCheck(), []);
 });
+
+test('settings and administration belong to the main device only (even the owner on a linked device is refused)', async () => {
+  const w = await world();
+  const linked = createEngine({ store: w.store, session: w.ownerS, now: w.now, isMain: () => false });
+  await rejects(linked.settings.set('store_name', 'X'), 'NOT_MAIN_DEVICE');
+  await rejects(linked.admin.backup(), 'NOT_MAIN_DEVICE');
+  await rejects(linked.admin.resetStock(), 'NOT_MAIN_DEVICE');
+  await rejects(linked.admin.resetOperations(), 'NOT_MAIN_DEVICE');
+  await rejects(linked.admin.restoreBackup({}), 'NOT_MAIN_DEVICE');
+  assert.equal((await linked.settings.get()).store_name, 'عقاقير العيادي');        // reading is still fine: every screen needs it
+  await linked.products.create({ name: 'Marteau', purchasePrice: '1', salePrice: '2', qty: '1' });   // daily work is untouched
+  const main = createEngine({ store: w.store, session: w.ownerS, now: w.now, isMain: () => true });
+  await main.settings.set('store_name', 'Y');
+  assert.equal((await main.settings.get()).store_name, 'Y');
+});

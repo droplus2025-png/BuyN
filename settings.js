@@ -41,7 +41,7 @@ export function settingsApi(ctx) {
     },
     // owner only: store identity, quick-sale %, invoice template ...
     async set(key, value) {
-      ctx.access.requireOwner();
+      ctx.access.requireOwner(); ctx.requireMain();
       if (!EDITABLE.has(key)) fail('UNKNOWN_SETTING', `Unknown setting ${key}`);
       if (key === 'categories') { const ok = value && typeof value === 'object' && Object.keys(value).every((d) => /^[0-9]$/.test(d) && String(value[d]).length <= 30); if (!ok) fail('BAD_CATEGORIES', 'Categories: digits 0-9, names up to 30 characters'); }
       if (key === 'letters_layout' && !['latin', 'ar'].includes(value)) fail('BAD_LAYOUT', 'Letters layout: latin or ar');

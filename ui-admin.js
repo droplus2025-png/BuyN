@@ -86,7 +86,6 @@ export async function renderAdmin(app) {
         <div class="kv"><span>التفعيل صالح حتى (دون اتصال)</span><b dir="ltr">${app.sync.leaseUntil ? fmtWhen(app.sync.leaseUntil) : '—'}</b></div>
         <button class="btn gold" id="syNow" style="width:100%;margin-top:8px">مزامنة الآن</button>
         ${role === 'main' ? '<button class="btn" id="syCode" style="width:100%;margin-top:8px">+ رمز ربط جهاز جديد</button><button class="btn" id="syDevs" style="width:100%;margin-top:8px">الأجهزة المرتبطة</button>' : ''}
-        ${role === 'linked' ? '<button class="btn red" id="syOff" style="width:100%;margin-top:8px">فك ارتباط هذا الجهاز</button>' : ''}
         <div class="muted" style="font-size:.78rem;margin-top:6px">تعمل المزامنة وحدها عند توفر الإنترنت. بدون إنترنت يستمر البرنامج بالعمل وتُرسل العمليات لاحقاً. الجهاز الرئيسي وحده يربط الأجهزة ويفصلها.</div></div>
 
       <div class="card" style="grid-column:1/-1"><div class="grp" style="margin-top:0">شكل الفاتورة (واتساب)</div>
@@ -200,10 +199,6 @@ export async function renderAdmin(app) {
       } catch (e) { toast(syncErrText(e), true, 3500); }
     });
     $('#syDevs')?.addEventListener('click', () => devices());
-    $('#syOff')?.addEventListener('click', async () => {
-      if (!(await confirmBox('فك الارتباط', 'يتوقف هذا الجهاز عن المزامنة وتبقى بياناته كما هي، ولن يتمكن من الانضمام إلا برمز ربط جديد. متابعة؟', 'فك الارتباط', 'إلغاء'))) return;
-      await app.sync.unlink(); draw();
-    });
     $('#addEmp').onclick = () => openModal({
       title: 'إضافة موظف', html: `<input id="n" class="inp" placeholder="اسم الموظف"><input id="c" class="inp" type="password" placeholder="كلمة مروره (4 أحرف على الأقل)"><div class="err" id="err"></div>`,
       buttons: [{ label: 'إلغاء' }, { label: 'حفظ', cls: 'gold', onClick: async (close, m) => {
